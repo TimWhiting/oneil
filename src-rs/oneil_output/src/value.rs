@@ -27,6 +27,29 @@ pub enum Value {
 }
 
 impl Value {
+    /// Compares two numeric values, returning their ordering.
+    /// Handles all 4-way Number/MeasuredNumber dispatch.
+    fn checked_numeric_cmp(&self, rhs: &Self) -> Result<Option<Ordering>, BinaryEvalError> {
+        match (self, rhs) {
+            (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs.partial_cmp(rhs)),
+            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => {
+                Ok(lhs.partial_cmp(rhs.normalized_value()))
+            }
+            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => {
+                Ok(lhs.normalized_value().partial_cmp(rhs))
+            }
+            (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => lhs.checked_partial_cmp(rhs),
+            (Self::Number(_) | Self::MeasuredNumber(_), _) => Err(BinaryEvalError::TypeMismatch {
+                lhs_type: Box::new(self.type_()),
+                rhs_type: Box::new(rhs.type_()),
+            }),
+            (lhs, _rhs) => Err(BinaryEvalError::InvalidLhsType {
+                expected_type: ExpectedType::NumberOrMeasuredNumber,
+                lhs_type: Box::new(lhs.type_()),
+            }),
+        }
+    }
+
     /// Checks if two values are equal.
     ///
     /// # Errors
@@ -36,7 +59,8 @@ impl Value {
         match (self, rhs) {
             (Self::Boolean(lhs), Self::Boolean(rhs)) => Ok(lhs == rhs),
             (Self::String(lhs), Self::String(rhs)) => Ok(lhs == rhs),
-            // if either number isn't measured, then units don't matter
+            // Use PartialEq (which uses is_close for scalars) rather than
+            // PartialOrd to preserve fuzzy equality semantics.
             (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs == rhs),
             (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(lhs == rhs.normalized_value()),
             (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(lhs.normalized_value() == rhs),
@@ -67,23 +91,8 @@ impl Value {
     ///
     /// Returns `ValueError::InvalidOperation` if the left operand is not a number.
     pub fn checked_lt(&self, rhs: &Self) -> Result<bool, BinaryEvalError> {
-        match (self, rhs) {
-            // if either number isn't measured, then units don't matter
-            (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs < rhs),
-            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(lhs < rhs.normalized_value()),
-            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(lhs.normalized_value() < rhs),
-            (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => lhs
-                .checked_partial_cmp(rhs)
-                .map(|ordering| ordering == Some(Ordering::Less)),
-            (Self::Number(_) | Self::MeasuredNumber(_), _) => Err(BinaryEvalError::TypeMismatch {
-                lhs_type: Box::new(self.type_()),
-                rhs_type: Box::new(rhs.type_()),
-            }),
-            (lhs, _rhs) => Err(BinaryEvalError::InvalidLhsType {
-                expected_type: ExpectedType::NumberOrMeasuredNumber,
-                lhs_type: Box::new(lhs.type_()),
-            }),
-        }
+        self.checked_numeric_cmp(rhs)
+            .map(|o| o == Some(Ordering::Less))
     }
 
     /// Checks if the left value is less than or equal to the right value.
@@ -94,25 +103,8 @@ impl Value {
     ///
     /// Returns `ValueError::InvalidOperation` if the left operand is not a number.
     pub fn checked_lte(&self, rhs: &Self) -> Result<bool, BinaryEvalError> {
-        match (self, rhs) {
-            // if either number isn't measured, then units don't matter
-            (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs <= rhs),
-            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(lhs <= rhs.normalized_value()),
-            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(lhs.normalized_value() <= rhs),
-            (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => {
-                lhs.checked_partial_cmp(rhs).map(|ordering| {
-                    ordering == Some(Ordering::Less) || ordering == Some(Ordering::Equal)
-                })
-            }
-            (Self::MeasuredNumber(_) | Self::Number(_), _) => Err(BinaryEvalError::TypeMismatch {
-                lhs_type: Box::new(self.type_()),
-                rhs_type: Box::new(rhs.type_()),
-            }),
-            (lhs, _rhs) => Err(BinaryEvalError::InvalidLhsType {
-                expected_type: ExpectedType::NumberOrMeasuredNumber,
-                lhs_type: Box::new(lhs.type_()),
-            }),
-        }
+        self.checked_numeric_cmp(rhs)
+            .map(|o| matches!(o, Some(Ordering::Less | Ordering::Equal)))
     }
 
     /// Checks if the left value is greater than the right value.
@@ -123,23 +115,8 @@ impl Value {
     ///
     /// Returns `ValueError::InvalidOperation` if the left operand is not a number.
     pub fn checked_gt(&self, rhs: &Self) -> Result<bool, BinaryEvalError> {
-        match (self, rhs) {
-            // if either number isn't measured, then units don't matter
-            (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs > rhs),
-            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(lhs > rhs.normalized_value()),
-            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(lhs.normalized_value() > rhs),
-            (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => lhs
-                .checked_partial_cmp(rhs)
-                .map(|ordering| ordering == Some(Ordering::Greater)),
-            (Self::MeasuredNumber(_) | Self::Number(_), _) => Err(BinaryEvalError::TypeMismatch {
-                lhs_type: Box::new(self.type_()),
-                rhs_type: Box::new(rhs.type_()),
-            }),
-            (lhs, _rhs) => Err(BinaryEvalError::InvalidLhsType {
-                expected_type: ExpectedType::NumberOrMeasuredNumber,
-                lhs_type: Box::new(lhs.type_()),
-            }),
-        }
+        self.checked_numeric_cmp(rhs)
+            .map(|o| o == Some(Ordering::Greater))
     }
 
     /// Checks if the left value is greater than or equal to the right value.
@@ -150,25 +127,8 @@ impl Value {
     ///
     /// Returns `ValueError::InvalidOperation` if the left operand is not a number.
     pub fn checked_gte(&self, rhs: &Self) -> Result<bool, BinaryEvalError> {
-        match (self, rhs) {
-            // if either number isn't measured, then units don't matter
-            (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs >= rhs),
-            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(lhs >= rhs.normalized_value()),
-            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(lhs.normalized_value() >= rhs),
-            (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => {
-                lhs.checked_partial_cmp(rhs).map(|ordering| {
-                    ordering == Some(Ordering::Greater) || ordering == Some(Ordering::Equal)
-                })
-            }
-            (Self::MeasuredNumber(_) | Self::Number(_), _) => Err(BinaryEvalError::TypeMismatch {
-                lhs_type: Box::new(self.type_()),
-                rhs_type: Box::new(rhs.type_()),
-            }),
-            (lhs, _rhs) => Err(BinaryEvalError::InvalidLhsType {
-                expected_type: ExpectedType::NumberOrMeasuredNumber,
-                lhs_type: Box::new(lhs.type_()),
-            }),
-        }
+        self.checked_numeric_cmp(rhs)
+            .map(|o| matches!(o, Some(Ordering::Greater | Ordering::Equal)))
     }
 
     /// Adds two values.
