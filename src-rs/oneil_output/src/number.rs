@@ -1209,9 +1209,10 @@ impl PartialEq for Number {
 }
 
 impl PartialOrd for Number {
-    /// Partial ordering for number values
+    /// Partial ordering for number values.
     ///
-    /// For scalar values, we use the partial ordering of f64.
+    /// For scalar values, we use fuzzy comparison via `is_close` for equality,
+    /// consistent with `PartialEq` and with `Interval::partial_cmp`.
     ///
     /// An interval is less than a scalar if both the min and max are less than the
     /// scalar. Same goes for greater than and equal to.
@@ -1220,7 +1221,13 @@ impl PartialOrd for Number {
     /// than the other interval. Same goes for greater than and equal to.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (Self::Scalar(lhs), Self::Scalar(rhs)) => lhs.partial_cmp(rhs),
+            (Self::Scalar(lhs), Self::Scalar(rhs)) => {
+                if is_close(*lhs, *rhs) {
+                    Some(Ordering::Equal)
+                } else {
+                    lhs.partial_cmp(rhs)
+                }
+            }
             (Self::Scalar(lhs), Self::Interval(rhs)) => Interval::from(lhs).partial_cmp(rhs),
             (Self::Interval(lhs), Self::Scalar(rhs)) => lhs.partial_cmp(&Interval::from(rhs)),
             (Self::Interval(lhs), Self::Interval(rhs)) => lhs.partial_cmp(rhs),

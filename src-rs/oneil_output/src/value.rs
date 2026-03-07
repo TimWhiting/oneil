@@ -59,14 +59,12 @@ impl Value {
         match (self, rhs) {
             (Self::Boolean(lhs), Self::Boolean(rhs)) => Ok(lhs == rhs),
             (Self::String(lhs), Self::String(rhs)) => Ok(lhs == rhs),
-            // Use PartialEq (which uses is_close for scalars) rather than
-            // PartialOrd to preserve fuzzy equality semantics.
-            (Self::Number(lhs), Self::Number(rhs)) => Ok(lhs == rhs),
-            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(lhs == rhs.normalized_value()),
-            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(lhs.normalized_value() == rhs),
-            (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => lhs
-                .checked_partial_cmp(rhs)
-                .map(|ordering| ordering == Some(Ordering::Equal)),
+            (
+                Self::Number(_) | Self::MeasuredNumber(_),
+                Self::Number(_) | Self::MeasuredNumber(_),
+            ) => self
+                .checked_numeric_cmp(rhs)
+                .map(|o| o == Some(Ordering::Equal)),
             (lhs, rhs) => Err(BinaryEvalError::TypeMismatch {
                 lhs_type: Box::new(lhs.type_()),
                 rhs_type: Box::new(rhs.type_()),
