@@ -2,6 +2,7 @@
 
 use oneil_runtime::output::ir;
 use oneil_shared::{
+    expr_ops::ComparisonOp,
     paths::{ModelPath, PythonPath},
     span::Span,
     symbols::{
@@ -292,7 +293,7 @@ fn find_symbol_in_external_variable(
 fn find_symbol_in_comparison_op(
     left: &ir::Expr,
     right: &ir::Expr,
-    rest_chained: &[(ir::ComparisonOp, ir::Expr)],
+    rest_chained: &[(ComparisonOp, ir::Expr)],
     offset: usize,
 ) -> Option<SymbolAtPosition> {
     find_symbol_in_expr(left, offset)

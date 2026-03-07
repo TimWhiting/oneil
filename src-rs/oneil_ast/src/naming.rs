@@ -1,5 +1,4 @@
 //! Naming constructs for the AST
-
 use indexmap::Equivalent;
 use oneil_shared::{
     labels::{ParameterLabel, SectionLabel},

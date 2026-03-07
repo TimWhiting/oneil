@@ -1,7 +1,11 @@
 use std::iter;
 
 use oneil_ir as ir;
-use oneil_shared::{paths::ModelPath, span::Span};
+use oneil_shared::{
+    expr_ops::{BinaryOp, ComparisonOp, Literal, UnaryOp},
+    paths::ModelPath,
+    span::Span,
+};
 
 use oneil_output::{Number, Unit, UnitConversionError, Value};
 
@@ -117,14 +121,14 @@ pub fn eval_expr<'a, E: ExternalEvaluationContext>(
 struct ComparisonSubexpressionsResult {
     left_result: Value,
     left_result_span: Span,
-    rest_results: Vec<(ir::ComparisonOp, (Value, Span))>,
+    rest_results: Vec<(ComparisonOp, (Value, Span))>,
 }
 
 fn eval_comparison_subexpressions<E: ExternalEvaluationContext>(
     left: &ir::Expr,
-    op: ir::ComparisonOp,
+    op: ComparisonOp,
     right: &ir::Expr,
-    rest_chained: &[(ir::ComparisonOp, ir::Expr)],
+    rest_chained: &[(ComparisonOp, ir::Expr)],
     context: &EvalContext<'_, E>,
 ) -> Result<ComparisonSubexpressionsResult, Vec<EvalError>> {
     let left_result = eval_expr(left, context);
@@ -183,7 +187,7 @@ fn eval_comparison_subexpressions<E: ExternalEvaluationContext>(
 fn eval_comparison_chain(
     left_result: Value,
     left_result_span: Span,
-    rest_results: Vec<(ir::ComparisonOp, (Value, Span))>,
+    rest_results: Vec<(ComparisonOp, (Value, Span))>,
 ) -> Result<Value, Vec<EvalError>> {
     // structs only used internally in this function
     struct ComparisonSuccess {
@@ -258,17 +262,17 @@ fn eval_comparison_chain(
 fn eval_comparison_op(
     lhs: &Value,
     lhs_span: Span,
-    op: ir::ComparisonOp,
+    op: ComparisonOp,
     rhs: &Value,
     rhs_span: Span,
 ) -> Result<bool, Box<EvalError>> {
     let result = match op {
-        ir::ComparisonOp::Eq => lhs.checked_eq(rhs),
-        ir::ComparisonOp::NotEq => lhs.checked_ne(rhs),
-        ir::ComparisonOp::LessThan => lhs.checked_lt(rhs),
-        ir::ComparisonOp::LessThanEq => lhs.checked_lte(rhs),
-        ir::ComparisonOp::GreaterThan => lhs.checked_gt(rhs),
-        ir::ComparisonOp::GreaterThanEq => lhs.checked_gte(rhs),
+        ComparisonOp::Eq => lhs.checked_eq(rhs),
+        ComparisonOp::NotEq => lhs.checked_ne(rhs),
+        ComparisonOp::LessThan => lhs.checked_lt(rhs),
+        ComparisonOp::LessThanEq => lhs.checked_lte(rhs),
+        ComparisonOp::GreaterThan => lhs.checked_gt(rhs),
+        ComparisonOp::GreaterThanEq => lhs.checked_gte(rhs),
     };
 
     result.map_err(|error| Box::new(binary_eval_error_to_eval_error(error, lhs_span, rhs_span)))
@@ -309,22 +313,22 @@ fn eval_binary_op_subexpressions<E: ExternalEvaluationContext>(
 fn eval_binary_op(
     left_result: Value,
     left_result_span: Span,
-    op: ir::BinaryOp,
+    op: BinaryOp,
     right_result: Value,
     right_result_span: Span,
 ) -> Result<Value, Vec<EvalError>> {
     let result = match op {
-        ir::BinaryOp::Add => left_result.checked_add(right_result),
-        ir::BinaryOp::Sub => left_result.checked_sub(right_result),
-        ir::BinaryOp::EscapedSub => left_result.checked_escaped_sub(right_result),
-        ir::BinaryOp::Mul => left_result.checked_mul(right_result),
-        ir::BinaryOp::Div => left_result.checked_div(right_result),
-        ir::BinaryOp::EscapedDiv => left_result.checked_escaped_div(right_result),
-        ir::BinaryOp::Mod => left_result.checked_rem(right_result),
-        ir::BinaryOp::Pow => left_result.checked_pow(right_result),
-        ir::BinaryOp::And => left_result.checked_and(right_result),
-        ir::BinaryOp::Or => left_result.checked_or(right_result),
-        ir::BinaryOp::MinMax => left_result.checked_min_max(right_result),
+        BinaryOp::Add => left_result.checked_add(right_result),
+        BinaryOp::Sub => left_result.checked_sub(right_result),
+        BinaryOp::EscapedSub => left_result.checked_escaped_sub(right_result),
+        BinaryOp::Mul => left_result.checked_mul(right_result),
+        BinaryOp::Div => left_result.checked_div(right_result),
+        BinaryOp::EscapedDiv => left_result.checked_escaped_div(right_result),
+        BinaryOp::Mod => left_result.checked_rem(right_result),
+        BinaryOp::Pow => left_result.checked_pow(right_result),
+        BinaryOp::And => left_result.checked_and(right_result),
+        BinaryOp::Or => left_result.checked_or(right_result),
+        BinaryOp::MinMax => left_result.checked_min_max(right_result),
     };
 
     result.map_err(|error| {
@@ -337,13 +341,13 @@ fn eval_binary_op(
 }
 
 fn eval_unary_op(
-    op: ir::UnaryOp,
+    op: UnaryOp,
     expr_result: Value,
     expr_result_span: Span,
 ) -> Result<Value, Vec<EvalError>> {
     let result = match op {
-        ir::UnaryOp::Neg => expr_result.checked_neg(),
-        ir::UnaryOp::Not => expr_result.checked_not(),
+        UnaryOp::Neg => expr_result.checked_neg(),
+        UnaryOp::Not => expr_result.checked_not(),
     };
 
     result.map_err(|error| vec![unary_eval_error_to_eval_error(error, expr_result_span)])
@@ -445,11 +449,11 @@ fn eval_variable<E: ExternalEvaluationContext>(
     }
 }
 
-fn eval_literal(value: &ir::Literal) -> Value {
+fn eval_literal(value: &Literal) -> Value {
     match value {
-        ir::Literal::Boolean(boolean) => Value::Boolean(*boolean),
-        ir::Literal::String(string) => Value::String(string.clone()),
-        ir::Literal::Number(number) => {
+        Literal::Boolean(boolean) => Value::Boolean(*boolean),
+        Literal::String(string) => Value::String(string.clone()),
+        Literal::Number(number) => {
             let number = Number::Scalar(*number);
             Value::Number(number)
         }

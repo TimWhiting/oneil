@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 
 use oneil_ir as ir;
 use oneil_shared::{
+    expr_ops::Literal,
     labels::ParameterLabel,
     paths::{ModelPath, PythonPath},
     span::Span,
@@ -35,7 +36,7 @@ pub fn reference_name(reference_name: &str) -> ReferenceName {
 
 pub fn expr_literal_number(value: f64) -> ir::Expr {
     let span = unimportant_span();
-    ir::Expr::literal(span, ir::Literal::number(value))
+    ir::Expr::literal(span, Literal::Number(value))
 }
 
 pub fn empty_model() -> ir::Model {

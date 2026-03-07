@@ -1,7 +1,10 @@
 use indexmap::IndexMap;
 
 use oneil_ir as ir;
-use oneil_shared::{span::Span, symbols::ParameterName};
+use oneil_shared::{
+    span::Span,
+    symbols::ParameterName,
+};
 
 use oneil_output::{MeasuredNumber, Number, Unit, Value};
 
@@ -757,6 +760,8 @@ mod tests {
         context::EvalContext,
         test_context::{TestExternalContext, test_model_path},
     };
+
+    use oneil_shared::expr_ops::{BinaryOp, Literal};
 
     use super::*;
 
@@ -1635,7 +1640,7 @@ mod tests {
         ) -> ir::Parameter {
             let expr = ir::Expr::Literal {
                 span: random_span(),
-                value: ir::Literal::Number(value),
+                value: Literal::Number(value),
             };
 
             let units = build_resolved_units(units);
@@ -1685,7 +1690,7 @@ mod tests {
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::Add,
+                op: BinaryOp::Add,
                 left: Box::new(expr_a),
                 right: Box::new(expr_b),
             };
@@ -1737,7 +1742,7 @@ mod tests {
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::Mul,
+                op: BinaryOp::Mul,
                 left: Box::new(expr_a),
                 right: Box::new(expr_b),
             };
@@ -1789,7 +1794,7 @@ mod tests {
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::Div,
+                op: BinaryOp::Div,
                 left: Box::new(expr_a),
                 right: Box::new(expr_b),
             };
@@ -1844,7 +1849,7 @@ mod tests {
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::EscapedDiv,
+                op: BinaryOp::EscapedDiv,
                 left: Box::new(expr_a),
                 right: Box::new(expr_b),
             };
@@ -1899,7 +1904,7 @@ mod tests {
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::EscapedSub,
+                op: BinaryOp::EscapedSub,
                 left: Box::new(expr_a),
                 right: Box::new(expr_b),
             };
@@ -1951,7 +1956,7 @@ mod tests {
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::Mod,
+                op: BinaryOp::Mod,
                 left: Box::new(expr_a),
                 right: Box::new(expr_b),
             };
@@ -1998,12 +2003,12 @@ mod tests {
 
             let expr_exponent = ir::Expr::Literal {
                 span: random_span(),
-                value: ir::Literal::Number(exponent),
+                value: Literal::Number(exponent),
             };
 
             let expr = ir::Expr::BinaryOp {
                 span: random_span(),
-                op: ir::BinaryOp::Pow,
+                op: BinaryOp::Pow,
                 left: Box::new(expr_base),
                 right: Box::new(expr_exponent),
             };

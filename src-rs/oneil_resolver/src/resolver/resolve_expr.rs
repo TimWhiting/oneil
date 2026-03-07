@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use oneil_ast as ast;
 use oneil_ir::{self as ir, Dependencies};
 use oneil_shared::{
+    expr_ops::{BinaryOp, ComparisonOp, Literal, UnaryOp},
     search::search,
     span::Span,
     symbols::{BuiltinFunctionName, PyFunctionName},
@@ -194,40 +195,19 @@ where
 }
 
 /// Converts an AST comparison operation to a model comparison operation.
-fn resolve_comparison_op(op: &ast::ComparisonOpNode) -> ir::ComparisonOp {
-    match &**op {
-        ast::ComparisonOp::LessThan => ir::ComparisonOp::LessThan,
-        ast::ComparisonOp::LessThanEq => ir::ComparisonOp::LessThanEq,
-        ast::ComparisonOp::GreaterThan => ir::ComparisonOp::GreaterThan,
-        ast::ComparisonOp::GreaterThanEq => ir::ComparisonOp::GreaterThanEq,
-        ast::ComparisonOp::Eq => ir::ComparisonOp::Eq,
-        ast::ComparisonOp::NotEq => ir::ComparisonOp::NotEq,
-    }
+/// Extracts the comparison operator from an AST node.
+fn resolve_comparison_op(op: &ast::ComparisonOpNode) -> ComparisonOp {
+    **op
 }
 
-/// Converts an AST binary operation to a model binary operation.
-fn resolve_binary_op(op: &ast::BinaryOpNode) -> ir::BinaryOp {
-    match &**op {
-        ast::BinaryOp::Add => ir::BinaryOp::Add,
-        ast::BinaryOp::Sub => ir::BinaryOp::Sub,
-        ast::BinaryOp::EscapedSub => ir::BinaryOp::EscapedSub,
-        ast::BinaryOp::Mul => ir::BinaryOp::Mul,
-        ast::BinaryOp::Div => ir::BinaryOp::Div,
-        ast::BinaryOp::EscapedDiv => ir::BinaryOp::EscapedDiv,
-        ast::BinaryOp::Mod => ir::BinaryOp::Mod,
-        ast::BinaryOp::Pow => ir::BinaryOp::Pow,
-        ast::BinaryOp::And => ir::BinaryOp::And,
-        ast::BinaryOp::Or => ir::BinaryOp::Or,
-        ast::BinaryOp::MinMax => ir::BinaryOp::MinMax,
-    }
+/// Extracts the binary operator from an AST node.
+fn resolve_binary_op(op: &ast::BinaryOpNode) -> BinaryOp {
+    **op
 }
 
-/// Converts an AST unary operation to a model unary operation.
-fn resolve_unary_op(op: &ast::UnaryOpNode) -> ir::UnaryOp {
-    match &**op {
-        ast::UnaryOp::Neg => ir::UnaryOp::Neg,
-        ast::UnaryOp::Not => ir::UnaryOp::Not,
-    }
+/// Extracts the unary operator from an AST node.
+fn resolve_unary_op(op: &ast::UnaryOpNode) -> UnaryOp {
+    **op
 }
 
 /// Resolves a function name to a model function name.
@@ -291,12 +271,9 @@ where
 }
 
 /// Converts an AST literal to a model literal.
-fn resolve_literal(literal: &ast::LiteralNode) -> ir::Literal {
-    match &**literal {
-        ast::Literal::Number(number) => ir::Literal::number(*number),
-        ast::Literal::String(string) => ir::Literal::string(string.clone()),
-        ast::Literal::Boolean(boolean) => ir::Literal::boolean(*boolean),
-    }
+/// Extracts the literal value from an AST node.
+fn resolve_literal(literal: &ast::LiteralNode) -> Literal {
+    (**literal).clone()
 }
 
 /// Extracts internal dependencies from an expression.
@@ -440,7 +417,7 @@ mod tests {
             panic!("Expected literal expression, got {result:?}");
         };
 
-        assert_eq!(value, ir::Literal::Number(42.0));
+        assert_eq!(value, Literal::Number(42.0));
     }
 
     #[test]
@@ -463,7 +440,7 @@ mod tests {
             panic!("Expected literal expression, got {result:?}");
         };
 
-        assert_eq!(value, ir::Literal::String("hello".to_string()));
+        assert_eq!(value, Literal::String("hello".to_string()));
     }
 
     #[test]
@@ -486,7 +463,7 @@ mod tests {
             panic!("Expected literal expression, got {result:?}");
         };
 
-        assert_eq!(value, ir::Literal::Boolean(true));
+        assert_eq!(value, Literal::Boolean(true));
     }
 
     #[test]
@@ -518,17 +495,17 @@ mod tests {
             panic!("Expected binary operation, got {result:?}");
         };
 
-        assert_eq!(op, ir::BinaryOp::Add);
+        assert_eq!(op, BinaryOp::Add);
 
         let ir::Expr::Literal { span: _, value } = *left else {
             panic!("Expected literal expression on left, got {left:?}");
         };
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
 
         let ir::Expr::Literal { span: _, value } = *right else {
             panic!("Expected literal expression on right, got {right:?}");
         };
-        assert_eq!(value, ir::Literal::Number(2.0));
+        assert_eq!(value, Literal::Number(2.0));
     }
 
     #[test]
@@ -553,12 +530,12 @@ mod tests {
             panic!("Expected unary operation, got {result:?}");
         };
 
-        assert_eq!(op, ir::UnaryOp::Neg);
+        assert_eq!(op, UnaryOp::Neg);
 
         let ir::Expr::Literal { span: _, value } = *expr else {
             panic!("Expected literal expression, got {expr:?}");
         };
-        assert_eq!(value, ir::Literal::Number(5.0));
+        assert_eq!(value, Literal::Number(5.0));
     }
 
     #[test]
@@ -601,7 +578,7 @@ mod tests {
             panic!("Expected literal argument, got {:?}", args[0]);
         };
 
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
     }
 
     #[test]
@@ -652,7 +629,7 @@ mod tests {
             panic!("Expected literal argument, got {:?}", args[0]);
         };
 
-        assert_eq!(value, ir::Literal::Number(42.0));
+        assert_eq!(value, Literal::Number(42.0));
     }
 
     #[test]
@@ -785,7 +762,7 @@ mod tests {
             panic!("Expected binary operation, got {result:?}");
         };
 
-        assert_eq!(op, ir::BinaryOp::Mul);
+        assert_eq!(op, BinaryOp::Mul);
 
         // check left side (1 + 2)
         let ir::Expr::BinaryOp {
@@ -798,17 +775,17 @@ mod tests {
             panic!("Expected binary operation on left side, got {left:?}");
         };
 
-        assert_eq!(left_op, ir::BinaryOp::Add);
+        assert_eq!(left_op, BinaryOp::Add);
 
         let ir::Expr::Literal { span: _, value } = *left_left else {
             panic!("Expected literal on left side, got {left_left:?}");
         };
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
 
         let ir::Expr::Literal { span: _, value } = *left_right else {
             panic!("Expected literal on right side, got {left_right:?}");
         };
-        assert_eq!(value, ir::Literal::Number(2.0));
+        assert_eq!(value, Literal::Number(2.0));
 
         // check right side (foo(1))
         let ir::Expr::FunctionCall {
@@ -839,24 +816,24 @@ mod tests {
             panic!("Expected literal argument, got {:?}", args[0]);
         };
 
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
     }
 
     #[test]
     fn resolve_binary_op_all_operations() {
         // create the operations
         let operations = vec![
-            (ast::BinaryOp::Add, ir::BinaryOp::Add),
-            (ast::BinaryOp::Sub, ir::BinaryOp::Sub),
-            (ast::BinaryOp::EscapedSub, ir::BinaryOp::EscapedSub),
-            (ast::BinaryOp::Mul, ir::BinaryOp::Mul),
-            (ast::BinaryOp::Div, ir::BinaryOp::Div),
-            (ast::BinaryOp::EscapedDiv, ir::BinaryOp::EscapedDiv),
-            (ast::BinaryOp::Mod, ir::BinaryOp::Mod),
-            (ast::BinaryOp::Pow, ir::BinaryOp::Pow),
-            (ast::BinaryOp::And, ir::BinaryOp::And),
-            (ast::BinaryOp::Or, ir::BinaryOp::Or),
-            (ast::BinaryOp::MinMax, ir::BinaryOp::MinMax),
+            (ast::BinaryOp::Add, BinaryOp::Add),
+            (ast::BinaryOp::Sub, BinaryOp::Sub),
+            (ast::BinaryOp::EscapedSub, BinaryOp::EscapedSub),
+            (ast::BinaryOp::Mul, BinaryOp::Mul),
+            (ast::BinaryOp::Div, BinaryOp::Div),
+            (ast::BinaryOp::EscapedDiv, BinaryOp::EscapedDiv),
+            (ast::BinaryOp::Mod, BinaryOp::Mod),
+            (ast::BinaryOp::Pow, BinaryOp::Pow),
+            (ast::BinaryOp::And, BinaryOp::And),
+            (ast::BinaryOp::Or, BinaryOp::Or),
+            (ast::BinaryOp::MinMax, BinaryOp::MinMax),
         ];
 
         for (ast_op, expected_ir_op) in operations {
@@ -875,18 +852,15 @@ mod tests {
     fn resolve_comparison_op_all_operations() {
         // create the operations
         let operations = vec![
-            (ast::ComparisonOp::LessThan, ir::ComparisonOp::LessThan),
-            (ast::ComparisonOp::LessThanEq, ir::ComparisonOp::LessThanEq),
-            (
-                ast::ComparisonOp::GreaterThan,
-                ir::ComparisonOp::GreaterThan,
-            ),
+            (ast::ComparisonOp::LessThan, ComparisonOp::LessThan),
+            (ast::ComparisonOp::LessThanEq, ComparisonOp::LessThanEq),
+            (ast::ComparisonOp::GreaterThan, ComparisonOp::GreaterThan),
             (
                 ast::ComparisonOp::GreaterThanEq,
-                ir::ComparisonOp::GreaterThanEq,
+                ComparisonOp::GreaterThanEq,
             ),
-            (ast::ComparisonOp::Eq, ir::ComparisonOp::Eq),
-            (ast::ComparisonOp::NotEq, ir::ComparisonOp::NotEq),
+            (ast::ComparisonOp::Eq, ComparisonOp::Eq),
+            (ast::ComparisonOp::NotEq, ComparisonOp::NotEq),
         ];
 
         for (ast_op, expected_ir_op) in operations {
@@ -905,8 +879,8 @@ mod tests {
     fn resolve_unary_op_all_operations() {
         // create the operations
         let operations = vec![
-            (ast::UnaryOp::Neg, ir::UnaryOp::Neg),
-            (ast::UnaryOp::Not, ir::UnaryOp::Not),
+            (ast::UnaryOp::Neg, UnaryOp::Neg),
+            (ast::UnaryOp::Not, UnaryOp::Not),
         ];
 
         for (ast_op, expected_ir_op) in operations {
@@ -990,17 +964,17 @@ mod tests {
         // Test number
         let ast_number = test_ast::literal_number_node(42.5);
         let ir_number = resolve_literal(&ast_number);
-        assert_eq!(ir_number, ir::Literal::Number(42.5));
+        assert_eq!(ir_number, Literal::Number(42.5));
 
         // Test string
         let ast_string = test_ast::literal_string_node("test string");
         let ir_string = resolve_literal(&ast_string);
-        assert_eq!(ir_string, ir::Literal::String("test string".to_string()));
+        assert_eq!(ir_string, Literal::String("test string".to_string()));
 
         // Test boolean
         let ast_bool = test_ast::literal_boolean_node(false);
         let ir_bool = resolve_literal(&ast_bool);
-        assert_eq!(ir_bool, ir::Literal::Boolean(false));
+        assert_eq!(ir_bool, Literal::Boolean(false));
     }
 
     #[test]
@@ -1076,17 +1050,17 @@ mod tests {
         else {
             panic!("Expected binary operation, got {result:?}");
         };
-        assert_eq!(op, ir::BinaryOp::Add);
+        assert_eq!(op, BinaryOp::Add);
 
         let ir::Expr::Literal { span: _, value } = *left else {
             panic!("Expected literal on left side, got {left:?}");
         };
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
 
         let ir::Expr::Literal { span: _, value } = *right else {
             panic!("Expected literal on right side, got {right:?}");
         };
-        assert_eq!(value, ir::Literal::Number(2.0));
+        assert_eq!(value, Literal::Number(2.0));
     }
 
     #[test]
@@ -1122,7 +1096,7 @@ mod tests {
         else {
             panic!("Expected binary operation, got {result:?}");
         };
-        assert_eq!(op, ir::BinaryOp::Mul);
+        assert_eq!(op, BinaryOp::Mul);
 
         let ir::Expr::BinaryOp {
             span: _,
@@ -1133,22 +1107,22 @@ mod tests {
         else {
             panic!("Expected binary operation on left side, got {left:?}");
         };
-        assert_eq!(left_op, ir::BinaryOp::Add);
+        assert_eq!(left_op, BinaryOp::Add);
 
         let ir::Expr::Literal { span: _, value } = *left_left else {
             panic!("Expected literal on left side, got {left_left:?}");
         };
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
 
         let ir::Expr::Literal { span: _, value } = *left_right else {
             panic!("Expected literal on right side, got {left_right:?}");
         };
-        assert_eq!(value, ir::Literal::Number(2.0));
+        assert_eq!(value, Literal::Number(2.0));
 
         let ir::Expr::Literal { span: _, value } = *right else {
             panic!("Expected literal on right side, got {right:?}");
         };
-        assert_eq!(value, ir::Literal::Number(3.0));
+        assert_eq!(value, Literal::Number(3.0));
     }
 
     #[test]
@@ -1172,7 +1146,7 @@ mod tests {
         let ir::Expr::Literal { span: _, value } = result else {
             panic!("Expected literal expression, got {result:?}");
         };
-        assert_eq!(value, ir::Literal::Number(42.0));
+        assert_eq!(value, Literal::Number(42.0));
     }
 
     #[test]
@@ -1207,7 +1181,7 @@ mod tests {
         else {
             panic!("Expected comparison operation, got {result:?}");
         };
-        assert_eq!(op, ir::ComparisonOp::LessThan);
+        assert_eq!(op, ComparisonOp::LessThan);
 
         let ir::Expr::Variable { span: _, variable } = *left else {
             panic!("Expected variable expression, got {left:?}");
@@ -1220,7 +1194,7 @@ mod tests {
         let ir::Expr::Literal { span: _, value } = *right else {
             panic!("Expected literal expression, got {right:?}");
         };
-        assert_eq!(value, ir::Literal::Number(5.0));
+        assert_eq!(value, Literal::Number(5.0));
 
         assert!(rest_chained.is_empty());
     }
@@ -1261,12 +1235,12 @@ mod tests {
             panic!("Expected comparison operation, got {result:?}");
         };
 
-        assert_eq!(op, ir::ComparisonOp::LessThan);
+        assert_eq!(op, ComparisonOp::LessThan);
 
         let ir::Expr::Literal { span: _, value } = *left else {
             panic!("Expected literal expression, got {left:?}");
         };
-        assert_eq!(value, ir::Literal::Number(1.0));
+        assert_eq!(value, Literal::Number(1.0));
 
         let ir::Expr::Variable { span: _, variable } = *right else {
             panic!("Expected variable expression, got {right:?}");
@@ -1278,12 +1252,12 @@ mod tests {
 
         assert_eq!(rest_chained.len(), 1);
         let (chained_op, chained_expr) = rest_chained.remove(0);
-        assert_eq!(chained_op, ir::ComparisonOp::LessThan);
+        assert_eq!(chained_op, ComparisonOp::LessThan);
 
         let ir::Expr::Literal { span: _, value } = chained_expr else {
             panic!("Expected literal expression, got {chained_expr:?}");
         };
-        assert_eq!(value, ir::Literal::Number(10.0));
+        assert_eq!(value, Literal::Number(10.0));
     }
 
     #[test]

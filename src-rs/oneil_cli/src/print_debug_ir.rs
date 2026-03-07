@@ -7,6 +7,7 @@ use oneil_runtime::output::{
     reference::{ModelIrReference, ReferenceImportReference, SubmodelImportReference},
 };
 use oneil_shared::{
+    expr_ops::Literal,
     paths::PythonPath,
     symbols::{ParameterName, ReferenceName, SubmodelName, TestIndex},
 };
@@ -685,15 +686,15 @@ fn print_variable(var: &ir::Variable, indent: usize) {
 }
 
 /// Prints a literal
-fn print_literal(lit: &ir::Literal, indent: usize) {
+fn print_literal(lit: &Literal, indent: usize) {
     match lit {
-        ir::Literal::Number(n) => {
+        Literal::Number(n) => {
             println!("{}    ├── Literal: {}", "    ".repeat(indent), n);
         }
-        ir::Literal::String(s) => {
+        Literal::String(s) => {
             println!("{}    ├── Literal: \"{}\"", "    ".repeat(indent), s);
         }
-        ir::Literal::Boolean(b) => {
+        Literal::Boolean(b) => {
             println!("{}    ├── Literal: {}", "    ".repeat(indent), b);
         }
     }
