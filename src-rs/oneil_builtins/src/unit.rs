@@ -262,6 +262,14 @@ pub fn builtin_units_complete() -> impl Iterator<Item = (UnitBaseName, BuiltinUn
             uses_prefixes: true,
         },
         UnitInfo {
+            name: "samples per second",
+            aliases: ["sps"].as_ref(),
+            magnitude: 1.0,
+            dimensions: DimensionMap::new(BTreeMap::from([(Dimension::Time, -1.0)])),
+            is_db: false,
+            uses_prefixes: true,
+        },
+        UnitInfo {
             name: "Pascal",
             aliases: ["Pa", "Pascal", "Pascals"].as_ref(),
             magnitude: 1.0,
