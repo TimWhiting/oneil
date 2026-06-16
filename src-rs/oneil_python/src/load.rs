@@ -3,7 +3,7 @@
 use std::{
     ffi::CString,
     iter,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -219,6 +219,16 @@ impl ImportTracker {
             self.builtins_import_orig.clone_ref(py),
         )
     }
+
+    pub fn is_local_path(&self, file_path: &Path) -> bool {
+        file_path.starts_with(&self.module_directory)
+    }
+
+    pub fn is_local_venv_path(&self, file_path: &Path) -> bool {
+        file_path
+            .components()
+            .any(|component| matches!(component, Component::Normal(os_str) if os_str == "venv" || os_str == ".venv"))
+    }
 }
 
 #[expect(
@@ -247,7 +257,7 @@ impl ImportTracker {
 
             // if the file path starts with the module directory, add it to the
             // import list
-            if file_path.starts_with(&self.module_directory) {
+            if self.is_local_path(&file_path) && !self.is_local_venv_path(&file_path) {
                 self.imports
                     .lock()
                     .expect("imports should not be poisoned")

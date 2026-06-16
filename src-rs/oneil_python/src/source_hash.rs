@@ -3,7 +3,7 @@ use std::path::Path;
 use indexmap::IndexMap;
 use xxhash_rust::xxh3::Xxh3Default;
 
-use crate::LoadPythonImportError;
+use crate::error::LoadPythonImportError;
 
 pub fn calculate_source_hash(source_paths: Vec<&Path>) -> Result<u64, LoadPythonImportError> {
     // sort the source paths to ensure consistent hashing
@@ -16,7 +16,7 @@ pub fn calculate_source_hash(source_paths: Vec<&Path>) -> Result<u64, LoadPython
     let mut file_errors = IndexMap::new();
 
     for source_path in source_paths {
-        let source = match std::fs::read_to_string(source_path) {
+        let source = match std::fs::read(source_path) {
             Ok(source) => source,
             Err(e) => {
                 file_errors.insert(source_path.to_path_buf(), e);
@@ -24,7 +24,7 @@ pub fn calculate_source_hash(source_paths: Vec<&Path>) -> Result<u64, LoadPython
             }
         };
 
-        builder.update(source.as_bytes());
+        builder.update(&source);
     }
 
     // if there are any file errors, return an error
