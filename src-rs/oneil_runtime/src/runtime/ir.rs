@@ -15,6 +15,32 @@ use super::Runtime;
 use crate::output::{self, ast, error::RuntimeErrors};
 
 impl Runtime {
+    /// Returns the loaded model and design info for a given model path if it has been loaded.
+    ///
+    /// This does not do any loading, so it doesn't need a mutable reference.
+    #[must_use]
+    pub fn get_loaded_model(
+        &self,
+        path: &ModelPath,
+    ) -> (
+        Option<output::reference::ModelTemplateReference<'_>>,
+        Option<frontend::ModelDesignInfo>,
+    ) {
+        let template_opt = self
+            .unit_graph_cache
+            .get(&CompilationUnit::Model(path.clone()))
+            .map(|graph| {
+                output::reference::ModelTemplateReference::new(
+                    graph.root.as_ref(),
+                    &self.unit_graph_cache,
+                )
+            });
+
+        let design_info_opt = self.design_info.get(path).cloned();
+
+        (template_opt, design_info_opt)
+    }
+
     /// Loads and lowers a model and all its dependencies into [`InstancedModel`] templates.
     ///
     /// Returns a reference to the lowered template so callers can inspect the
@@ -29,6 +55,7 @@ impl Runtime {
         path: &ModelPath,
     ) -> (
         Option<output::reference::ModelTemplateReference<'_>>,
+        Option<frontend::ModelDesignInfo>,
         RuntimeErrors,
     ) {
         self.load_and_lower_internal(path);
@@ -43,10 +70,12 @@ impl Runtime {
                 )
             });
 
+        let design_info_opt = self.design_info.get(path).cloned();
+
         let include_indirect_errors = true;
         let errors = self.get_model_diagnostics(path, include_indirect_errors);
 
-        (template_opt, errors)
+        (template_opt, design_info_opt, errors)
     }
 
     pub(super) fn load_and_lower_internal(&mut self, path: &ModelPath) {

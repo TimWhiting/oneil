@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use indexmap::{IndexMap, IndexSet};
 use oneil_builtins::BuiltinRef;
-use oneil_frontend::instance::graph::UnitGraphCache;
+use oneil_frontend::{CompilationUnit, instance::graph::UnitGraphCache};
 use oneil_shared::paths::{ModelPath, PythonPath, SourcePath};
 
 use super::Runtime;
@@ -65,5 +65,38 @@ impl Runtime {
     #[must_use]
     pub fn get_watch_paths(&self) -> IndexSet<SourcePath> {
         self.source_cache.paths().cloned().collect()
+    }
+
+    /// Gets the models that the runtime has loaded.
+    #[must_use]
+    pub fn get_loaded_models(&self) -> IndexSet<ModelPath> {
+        self.unit_graph_cache
+            .keys()
+            .map(CompilationUnit::source_path)
+            .collect()
+    }
+
+    /// Gets the designs that reference a given model path.
+    #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "panic enforces an invariant")]
+    pub fn get_designs_referencing_model(
+        &self,
+        param_model_path: &ModelPath,
+    ) -> IndexSet<ModelPath> {
+        self.get_loaded_models()
+            .iter()
+            .filter_map(|model| {
+                let (model, design_info) = self.get_loaded_model(model);
+                let model = model.expect("model must be loaded");
+
+                let (path, _) = design_info
+                    .as_ref()?
+                    .design_export
+                    .as_ref()?
+                    .target_model()?;
+
+                (path == param_model_path).then(|| model.path().clone())
+            })
+            .collect()
     }
 }

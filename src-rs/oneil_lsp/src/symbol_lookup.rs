@@ -1,7 +1,9 @@
 //! Symbol lookup utilities for finding definitions in Oneil models
 
+use oneil_frontend::{ApplyDesign, OverlayParameterValue};
 use oneil_runtime::output::ir;
 use oneil_shared::{
+    InstancePath,
     paths::{ModelPath, PythonPath},
     span::Span,
     symbols::{
@@ -41,6 +43,8 @@ pub enum SymbolAtPosition {
         path: ModelPath,
         span: Span,
     },
+    /// A submodel or reference import alias name
+    ModelImportAlias { alias: ReferenceName, span: Span },
     /// A reference to a model import (e.g., `x.model_name`)
     ///
     /// This occurs when the cursor is on the model name part (e.g., `model_name`)
@@ -61,6 +65,28 @@ pub enum SymbolAtPosition {
         name: BuiltinFunctionName,
         span: Span,
     },
+    /// The target model in a `design <model>` declaration.
+    DesignTarget { path: ModelPath, span: Span },
+    /// The design file path in an `apply <file> to <ref>` declaration.
+    ApplyDesignPath { path: ModelPath, span: Span },
+    /// A reference segment in the `to <ref>(.<ref>)*` path of an `apply` declaration.
+    ApplyTargetReference {
+        reference_name: ReferenceName,
+        span: Span,
+    },
+    /// A parameter name introduced by a design file (not present on the target model).
+    DesignParameterAddition { name: ParameterName, span: Span },
+    /// A parameter name overridden by a design file assignment.
+    DesignParameterOverride {
+        name: ParameterName,
+        instance_path: Option<InstancePath>,
+        span: Span,
+    },
+    /// The instance path in a design parameter override assignment.
+    DesignParameterOverrideInstancePath {
+        instance_path: InstancePath,
+        span: Span,
+    },
 }
 
 impl SymbolAtPosition {
@@ -73,10 +99,17 @@ impl SymbolAtPosition {
             | Self::ExternalParameterReference { span, .. }
             | Self::BuiltinValueReference { span, .. }
             | Self::ModelImportDefinition { span, .. }
+            | Self::ModelImportAlias { span, .. }
             | Self::ModelImportReference { span, .. }
             | Self::PythonImport { span, .. }
             | Self::PythonFunctionReference { span, .. }
-            | Self::BuiltinFunctionReference { span, .. } => span.clone(),
+            | Self::BuiltinFunctionReference { span, .. }
+            | Self::DesignTarget { span, .. }
+            | Self::ApplyDesignPath { span, .. }
+            | Self::ApplyTargetReference { span, .. }
+            | Self::DesignParameterAddition { span, .. }
+            | Self::DesignParameterOverride { span, .. }
+            | Self::DesignParameterOverrideInstancePath { span, .. } => span.clone(),
         }
     }
 }
@@ -84,6 +117,7 @@ impl SymbolAtPosition {
 /// Finds the symbol at a given byte offset in a model
 pub fn find_symbol_at_offset(
     model: oneil_runtime::output::reference::ModelTemplateReference<'_>,
+    design_info: Option<&oneil_frontend::ModelDesignInfo>,
     offset: usize,
 ) -> Option<SymbolAtPosition> {
     // Check if cursor is on a parameter definition or in the parameter expressions
@@ -110,7 +144,20 @@ pub fn find_symbol_at_offset(
     // Check if cursor is on a submodel import name. The submodel map is keyed
     // by alias (= reference name); the underlying source-level model name
     // surfaced to the LSP comes from the `SubmodelImport.name()` field.
-    for (_alias, submodel_import) in model.submodel_models() {
+    for submodel_import in model.submodel_models().values() {
+        if let Some(span) = submodel_import.alias_span()
+            && span_contains_offset(span, offset)
+        {
+            let alias = submodel_import
+                .alias()
+                .expect("submodel import must have an alias if it has an alias span");
+
+            return Some(SymbolAtPosition::ModelImportAlias {
+                alias: alias.clone(),
+                span: span.clone(),
+            });
+        }
+
         if span_contains_offset(submodel_import.name_span(), offset) {
             let submodel_path = submodel_import.path().clone();
 
@@ -122,11 +169,51 @@ pub fn find_symbol_at_offset(
         }
     }
 
-    // Check if cursor is on a reference import name
-    for (reference_name, reference_import) in model.reference_models() {
-        if span_contains_offset(reference_import.name_span(), offset) {
+    // Check if cursor is on an extracted alias from a `[…]` block.
+    for alias_import in model.alias_imports().values() {
+        if let Some(span) = &alias_import.alias_span
+            && span_contains_offset(span, offset)
+        {
+            let alias = alias_import
+                .alias
+                .as_ref()
+                .expect("alias import must have an alias if it has an alias span");
+
+            return Some(SymbolAtPosition::ModelImportAlias {
+                alias: alias.clone(),
+                span: span.clone(),
+            });
+        }
+
+        if span_contains_offset(&alias_import.name_span, offset) {
             return Some(SymbolAtPosition::ModelImportDefinition {
-                name: ModelImportName::Reference(reference_name.clone()),
+                name: ModelImportName::Submodel(alias_import.source.clone()),
+                path: model.path().clone(),
+                span: alias_import.name_span.clone(),
+            });
+        }
+    }
+
+    // Check if cursor is on a reference import name
+    for reference_import in model.reference_models().values() {
+        if let Some(span) = reference_import.alias_span()
+            && span_contains_offset(span, offset)
+        {
+            let alias = reference_import
+                .alias()
+                .expect("reference import must have an alias if it has an alias span");
+
+            return Some(SymbolAtPosition::ModelImportAlias {
+                alias: alias.clone(),
+                span: span.clone(),
+            });
+        }
+
+        if span_contains_offset(reference_import.name_span(), offset) {
+            let reference_name = reference_import.name().clone();
+
+            return Some(SymbolAtPosition::ModelImportDefinition {
+                name: ModelImportName::Reference(reference_name),
                 path: reference_import.path().clone(),
                 span: reference_import.name_span().clone(),
             });
@@ -150,7 +237,138 @@ pub fn find_symbol_at_offset(
         }
     }
 
+    if let Some(design_info) = design_info {
+        return find_symbol_in_design_info(design_info, offset);
+    }
+
     None
+}
+
+/// Finds a symbol in design metadata when it was not found in the model template.
+///
+/// Design files store parameter assignments in [`oneil_frontend::ModelDesignInfo`]
+/// rather than on the lowered model template, so this pass covers those spans.
+fn find_symbol_in_design_info(
+    design_info: &oneil_frontend::ModelDesignInfo,
+    offset: usize,
+) -> Option<SymbolAtPosition> {
+    for apply in &design_info.applied_designs {
+        if let Some(symbol) = find_symbol_in_apply_design(apply, offset) {
+            return Some(symbol);
+        }
+    }
+
+    let design = design_info.design_export.as_ref()?;
+
+    if let Some((path, span)) = design.target_model()
+        && span_contains_offset(span, offset)
+    {
+        return Some(SymbolAtPosition::DesignTarget {
+            path: path.clone(),
+            span: span.clone(),
+        });
+    }
+
+    for param in design.parameter_additions() {
+        if let Some(symbol) = find_symbol_in_design_parameter(param, offset) {
+            return Some(symbol);
+        }
+    }
+
+    for (name, overlay) in design.parameter_overrides() {
+        if let Some(symbol) = find_symbol_in_design_override(name, None, overlay, offset) {
+            return Some(symbol);
+        }
+    }
+
+    for (path, name, overlay) in design.scoped_parameter_overrides() {
+        if let Some(symbol) = find_symbol_in_design_override(name, Some(path), overlay, offset) {
+            return Some(symbol);
+        }
+    }
+
+    for test in design.test_additions() {
+        if span_contains_offset(test.span(), offset) {
+            return find_symbol_in_expr(test.expr(), offset);
+        }
+    }
+
+    None
+}
+
+/// Finds a symbol in an `apply <file> to <ref>` declaration.
+fn find_symbol_in_apply_design(apply: &ApplyDesign, offset: usize) -> Option<SymbolAtPosition> {
+    if span_contains_offset(&apply.design_path_span, offset) {
+        let path = apply.design_path.to_model_path();
+        return Some(SymbolAtPosition::ApplyDesignPath {
+            path,
+            span: apply.design_path_span.clone(),
+        });
+    }
+
+    for (path, seg_span) in &apply.target_segments {
+        if span_contains_offset(seg_span, offset) {
+            let reference_name = path.clone();
+            return Some(SymbolAtPosition::ApplyTargetReference {
+                reference_name,
+                span: seg_span.clone(),
+            });
+        }
+    }
+
+    None
+}
+
+/// Finds a symbol in a design parameter addition.
+fn find_symbol_in_design_parameter(
+    param: &ir::Parameter,
+    offset: usize,
+) -> Option<SymbolAtPosition> {
+    if span_contains_offset(param.name_span(), offset) {
+        return Some(SymbolAtPosition::DesignParameterAddition {
+            name: param.name().clone(),
+            span: param.name_span().clone(),
+        });
+    }
+
+    if let Some(symbol) = find_symbol_in_parameter_value(param.value(), offset) {
+        return Some(symbol);
+    }
+
+    find_symbol_in_limits(param.limits(), offset)
+}
+
+/// Finds a symbol in a design parameter override assignment.
+fn find_symbol_in_design_override(
+    name: &ParameterName,
+    instance_path: Option<&InstancePath>,
+    overlay: &OverlayParameterValue,
+    offset: usize,
+) -> Option<SymbolAtPosition> {
+    if span_contains_offset(&overlay.design_span, offset) {
+        return Some(SymbolAtPosition::DesignParameterOverride {
+            name: name.clone(),
+            instance_path: instance_path.cloned(),
+            span: overlay.design_span.clone(),
+        });
+    }
+
+    if let Some(instance_path) = instance_path
+        && let Some(span) = &overlay.instance_path_span
+        && span_contains_offset(span, offset)
+    {
+        return Some(SymbolAtPosition::DesignParameterOverrideInstancePath {
+            instance_path: instance_path.clone(),
+            span: span.clone(),
+        });
+    }
+
+    if let Some(symbol) = find_symbol_in_parameter_value(&overlay.value, offset) {
+        return Some(symbol);
+    }
+
+    let limits = overlay.limits_override.as_ref()?;
+    find_symbol_in_limits(limits, offset)
 }
 
 fn find_symbol_in_limits(limits: &ir::Limits, offset: usize) -> Option<SymbolAtPosition> {

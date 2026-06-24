@@ -10,7 +10,7 @@ use oneil_shared::{
     labels::{ParameterLabel, RenderName, SectionLabel},
     paths::{DesignPath, ModelPath},
     span::Span,
-    symbols::{ParameterName, TestIndex},
+    symbols::{ParameterName, ReferenceName, TestIndex},
 };
 
 /// Declarative record of an `apply <file> to <path>` declaration.
@@ -22,19 +22,25 @@ use oneil_shared::{
 pub struct ApplyDesign {
     /// Path to the `.one` design file being applied.
     pub design_path: DesignPath,
+    /// Span of the design path
+    pub design_path_span: Span,
     /// Reference-name path on the consuming model identifying the target instance.
     pub target: InstancePath,
+    /// Segments of the target path and their spans. Used in the LSP
+    pub target_segments: Vec<(ReferenceName, Span)>,
     /// Span of the `apply` declaration that produced this record.
     pub span: Span,
 }
 
 /// Resolved RHS for a single parameter assignment inside a design.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OverlayParameterValue {
+pub struct OverlayParameterValue {
     /// Resolved parameter value (expression or piecewise).
     pub value: ir::ParameterValue,
     /// Span of the design assignment identifier.
     pub design_span: Span,
+    /// Span of the instance path that the parameter is overridden on.
+    pub instance_path_span: Option<Span>,
     /// Span of the full parameter definition on the target model (falls back to
     /// `design_span` when the target parameter is absent from the resolved model).
     pub original_model_span: Span,
@@ -65,8 +71,8 @@ pub(crate) struct OverlayParameterValue {
 /// processed recursively by the graph builder.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Design {
-    /// Model this design parameterizes (`design <name>`), when set.
-    pub(crate) target_model: Option<ModelPath>,
+    /// Model this design parameterizes (`design <name>`) and its span, when set.
+    pub(crate) target_model: Option<(ModelPath, Span)>,
     /// Model-level documentation note from the design file itself, if present.
     ///
     /// When a design is evaluated as the entry point (e.g. `oneil eval mars.one`
@@ -95,5 +101,39 @@ impl Design {
     /// Creates an empty design with no declared target.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the resolved `design <model>` target and its source span, when declared.
+    #[must_use]
+    pub fn target_model(&self) -> Option<(&ModelPath, &Span)> {
+        self.target_model.as_ref().map(|(path, span)| (path, span))
+    }
+
+    /// Returns parameters introduced by this design file.
+    pub fn parameter_additions(&self) -> impl Iterator<Item = &ir::Parameter> {
+        self.parameter_additions.values()
+    }
+
+    /// Returns parameter overrides (`id = expr`) from this design file.
+    pub fn parameter_overrides(
+        &self,
+    ) -> impl Iterator<Item = (&ParameterName, &OverlayParameterValue)> {
+        self.parameter_overrides.iter()
+    }
+
+    /// Returns scoped parameter overrides (`ref.id = expr`) from this design file.
+    pub fn scoped_parameter_overrides(
+        &self,
+    ) -> impl Iterator<Item = (&InstancePath, &ParameterName, &OverlayParameterValue)> {
+        self.scoped_overrides.iter().flat_map(|(path, overrides)| {
+            overrides
+                .iter()
+                .map(move |(name, overlay)| (path, name, overlay))
+        })
+    }
+
+    /// Returns tests added by this design file.
+    pub fn test_additions(&self) -> impl Iterator<Item = &ir::Test> {
+        self.test_additions.values()
     }
 }
