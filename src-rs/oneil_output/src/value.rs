@@ -380,11 +380,17 @@ impl Value {
     /// Returns `ValueError::InvalidOperation` if the left operand is not a number.
     pub fn checked_escaped_div(self, rhs: Self) -> Result<Self, BinaryEvalError> {
         match (self, rhs) {
-            (Self::Number(lhs), Self::Number(rhs)) => Ok(Self::Number(lhs / rhs)),
+            (Self::Number(lhs), Self::Number(rhs)) => Ok(Self::Number(lhs.escaped_div(rhs))),
             // if any of the numbers is not measured, it is implicitly coerced to a
             // measured number with unit `1`
-            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => Ok(Self::MeasuredNumber(lhs / rhs)),
-            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => Ok(Self::MeasuredNumber(lhs / rhs)),
+            (Self::Number(lhs), Self::MeasuredNumber(rhs)) => {
+                MeasuredNumber::from_number_and_unit(lhs, Unit::one())
+                    .checked_escaped_div(rhs)
+                    .map(Self::MeasuredNumber)
+            }
+            (Self::MeasuredNumber(lhs), Self::Number(rhs)) => lhs
+                .checked_escaped_div(MeasuredNumber::from_number_and_unit(rhs, Unit::one()))
+                .map(Self::MeasuredNumber),
             (Self::MeasuredNumber(lhs), Self::MeasuredNumber(rhs)) => {
                 lhs.checked_escaped_div(rhs).map(Self::MeasuredNumber)
             }
