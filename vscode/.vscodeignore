@@ -1,4 +1,32 @@
+# Editor / test scaffolding
 .vscode/**
 .vscode-test/**
+
+# Developer docs
 .gitignore
 vsc-extension-quickstart.md
+docs/**
+
+# Extension source — bundled into out/extension.js by esbuild
+src/**
+tsconfig.json
+esbuild.mjs
+
+# Extension dependencies — bundled, so node_modules is not needed at runtime
+node_modules/**
+package-lock.json
+
+# Model-renderer source and tooling — built output lives in out/model-renderer/
+model-renderer/**
+
+# Old tsc-compiled module files — superseded by the esbuild bundle
+out/webview/**
+out/bibliography/**
+out/pdf/**
+out/diagnostics/**
+
+# Stale build artifact from a previous layout
+out/webview-ui/**
+
+# Source maps (not useful to extension consumers)
+out/**/*.map

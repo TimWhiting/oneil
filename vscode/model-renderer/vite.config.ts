@@ -1,10 +1,30 @@
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import { resolve } from "path"
 
+/**
+ * Rollup plugin that removes legacy TTF and WOFF KaTeX font variants from the
+ * bundle, keeping only WOFF2.  The VS Code webview runs on Chromium, which has
+ * full WOFF2 support, so the legacy formats are dead weight.  The KaTeX CSS
+ * still references them but the browser picks WOFF2 first and never requests
+ * the missing files.
+ */
+function dropLegacyKaTeXFonts(): Plugin {
+    return {
+        name: "drop-legacy-katex-fonts",
+        generateBundle(_options, bundle) {
+            for (const key of Object.keys(bundle)) {
+                if (/KaTeX[^/]*\.(ttf|woff)$/.test(key)) {
+                    delete bundle[key]
+                }
+            }
+        },
+    }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-    plugins: [react()],
+    plugins: [react(), dropLegacyKaTeXFonts()],
     resolve: {
         alias: {
             // react-pdf bundles its own pdfjs-dist internally.  Aliasing ensures

@@ -8,6 +8,11 @@
 
 ## Unreleased
 
+## v0.3.0 - 2026-06-29
+
+- Syntax highlighting update
+- Rendering model view
+
 ## v0.2.2 - 2026-04-15
 
 - Syntax highlighting update

@@ -20,3 +20,6 @@ oncmp_config.toml
 # TypeScript / toolchain source maps (do not commit)
 *.js.map
 *.css.map
+
+# VSCode extension package
+*.vsix

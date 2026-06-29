@@ -3,7 +3,7 @@
   "displayName": "Oneil",
   "description": "VS Code support for the Oneil design specification language",
   "icon": "./icons/oneil-logo-large.png",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "careweather",
   "license": "MPL-2.0",
   "engines": {
@@ -162,7 +162,8 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run build:webview",
+    "vscode:prepublish": "npm run bundle -- --production && npm run build:webview",
+    "bundle": "node esbuild.mjs",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "build:webview": "npm --prefix model-renderer run build",
@@ -179,6 +180,7 @@
     "@types/vscode": "^1.0.0",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
+    "esbuild": "^0.25.12",
     "eslint": "^9.25.1",
     "typescript": "^5.8.3"
   }
