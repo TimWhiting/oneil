@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-07-03
+
+### Added
+
+- **docs**: Added a changelog
+
+### Fixed
+
+- **builtins**: `min` and `max` functions match behavior in Python Oneil
+- **cache**: infinity, negative infinity, and NaN encode as special JSON values
+  rather than `null`
+- **python**: importing a module doesn't fail if `__file__` is `None`
+- **parser**: Whitespace at the beginning of a file doesn't cause parsing to
+  fail
+- **resolution**: If a reference has errors, don't show an "undefined
+  reference" error
+
 ## [0.16.0] - 2026-06-26
 
 0.16.0 is the initial release of the Rust rewrite to the public. It has feature
