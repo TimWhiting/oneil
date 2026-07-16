@@ -510,3 +510,630 @@ fn eval_literal(value: &ir::Literal) -> Value {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::{E, PI};
+
+    use oneil_ir::{
+        self as ir,
+        test_helpers::{
+            expr::{
+                binary, builtin_call, builtin_var, compare, compare_chained, external_var,
+                fallback, imported_call, lit_bool, lit_number, lit_string, param_var, unary,
+                unit_cast,
+            },
+            unit::{UnitSpec, ir_composite_unit},
+        },
+    };
+    use oneil_output::{
+        self as output, Dimension, DisplayUnit, EvalError, ExpectedType, Number, Value, ValueType,
+    };
+    use oneil_shared::{
+        EvalInstanceKey,
+        paths::PythonPath,
+        symbols::{ParameterName, PyFunctionName, ReferenceName},
+    };
+
+    use crate::{
+        check_boolean, check_invalid_type, check_is_close, check_scalar_close, check_type_mismatch,
+        check_units_dimensionally_eq,
+        context::EvalContext,
+        test_context::{TestExternalContext, test_model_path},
+        test_fixtures::{output_parameter, scalar_number_type},
+    };
+
+    use super::*;
+
+    /// Evaluates an expression in a fresh test context.
+    fn eval(expr: &ir::Expr) -> Result<Value, Vec<EvalError>> {
+        let mut external = TestExternalContext::new();
+        let mut context = EvalContext::new(&mut external);
+        eval_expr(expr, &mut context).map(|(value, _span)| value)
+    }
+
+    mod literals {
+        use super::*;
+
+        #[test]
+        fn eval_number_literal() {
+            let value = eval(&lit_number(42.5)).expect("eval should succeed");
+            check_scalar_close(42.5, &value).assert();
+        }
+
+        #[test]
+        fn eval_boolean_literal() {
+            let value = eval(&lit_bool(true)).expect("eval should succeed");
+            check_boolean(true, &value).assert();
+        }
+
+        #[test]
+        fn eval_string_literal() {
+            let value = eval(&lit_string("hello")).expect("eval should succeed");
+            assert_eq!(value, Value::String("hello".to_string()));
+        }
+    }
+
+    mod binary_ops {
+        use super::*;
+
+        #[test]
+        fn eval_numeric_ops_table() {
+            let cases = [
+                (ir::BinaryOp::Add, 2.0, 3.0, 5.0),
+                (ir::BinaryOp::Sub, 5.0, 2.0, 3.0),
+                (ir::BinaryOp::EscapedSub, 5.0, 2.0, 3.0),
+                (ir::BinaryOp::Mul, 4.0, 3.0, 12.0),
+                (ir::BinaryOp::Div, 10.0, 4.0, 2.5),
+                (ir::BinaryOp::EscapedDiv, 10.0, 4.0, 2.5),
+                (ir::BinaryOp::Mod, 10.0, 3.0, 1.0),
+                (ir::BinaryOp::Pow, 2.0, 3.0, 8.0),
+            ];
+
+            for (op, left, right, expected) in cases {
+                let value = eval(&binary(op, lit_number(left), lit_number(right)))
+                    .expect("eval should succeed");
+                check_scalar_close(expected, &value).assert();
+            }
+        }
+
+        #[test]
+        fn eval_boolean_ops_table() {
+            let cases = [
+                (ir::BinaryOp::And, true, false, false),
+                (ir::BinaryOp::Or, false, true, true),
+            ];
+
+            for (op, left, right, expected) in cases {
+                let value = eval(&binary(op, lit_bool(left), lit_bool(right)))
+                    .expect("eval should succeed");
+                check_boolean(expected, &value).assert();
+            }
+        }
+
+        #[test]
+        fn eval_min_max() {
+            let expr = binary(ir::BinaryOp::MinMax, lit_number(3.0), lit_number(7.0));
+            let value = eval(&expr).expect("eval should succeed");
+            let Value::Number(Number::Interval(interval)) = value else {
+                panic!("expected interval number, got {value:?}");
+            };
+            check_is_close(3.0, interval.min()).assert();
+            check_is_close(7.0, interval.max()).assert();
+        }
+
+        #[test]
+        fn eval_add_type_mismatch() {
+            let expr = binary(ir::BinaryOp::Add, lit_number(1.0), lit_bool(true));
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            check_type_mismatch(
+                &errors[0],
+                &ExpectedType::Number { number_type: None },
+                &ValueType::Boolean,
+            )
+            .assert();
+        }
+
+        #[test]
+        fn eval_collects_errors_from_both_operands() {
+            // Both sides fail independently before the binary op runs.
+            let expr = binary(
+                ir::BinaryOp::Add,
+                unary(ir::UnaryOp::Not, lit_number(1.0)),
+                unary(ir::UnaryOp::Not, lit_number(2.0)),
+            );
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 2);
+            check_invalid_type(&errors[0], &ExpectedType::Boolean, &scalar_number_type()).assert();
+            check_invalid_type(&errors[1], &ExpectedType::Boolean, &scalar_number_type()).assert();
+        }
+    }
+
+    mod unary_ops {
+        use super::*;
+
+        #[test]
+        fn eval_neg() {
+            let expr = unary(ir::UnaryOp::Neg, lit_number(5.0));
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(-5.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_not() {
+            let expr = unary(ir::UnaryOp::Not, lit_bool(true));
+            let value = eval(&expr).expect("eval should succeed");
+            check_boolean(false, &value).assert();
+        }
+
+        #[test]
+        fn eval_neg_type_error() {
+            let expr = unary(ir::UnaryOp::Neg, lit_bool(true));
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            check_invalid_type(
+                &errors[0],
+                &ExpectedType::Number { number_type: None },
+                &ValueType::Boolean,
+            )
+            .assert();
+        }
+
+        #[test]
+        fn eval_not_type_error() {
+            let expr = unary(ir::UnaryOp::Not, lit_number(1.0));
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            check_invalid_type(&errors[0], &ExpectedType::Boolean, &scalar_number_type()).assert();
+        }
+    }
+
+    mod comparisons {
+        use super::*;
+
+        #[test]
+        fn eval_comparisons_table() {
+            let cases = [
+                (ir::ComparisonOp::Eq, 2.0, 2.0, true),
+                (ir::ComparisonOp::Eq, 2.0, 3.0, false),
+                (ir::ComparisonOp::NotEq, 2.0, 3.0, true),
+                (ir::ComparisonOp::LessThan, 1.0, 2.0, true),
+                (ir::ComparisonOp::LessThanEq, 2.0, 2.0, true),
+                (ir::ComparisonOp::GreaterThan, 3.0, 1.0, true),
+                (ir::ComparisonOp::GreaterThanEq, 3.0, 3.0, true),
+            ];
+            for (op, left, right, expected) in cases {
+                let value = eval(&compare(op, lit_number(left), lit_number(right)))
+                    .expect("eval should succeed");
+                check_boolean(expected, &value).assert();
+            }
+        }
+
+        #[test]
+        fn eval_chained_comparison_true() {
+            // 1 < 2 < 3
+            let expr = compare_chained(
+                lit_number(1.0),
+                ir::ComparisonOp::LessThan,
+                lit_number(2.0),
+                vec![(ir::ComparisonOp::LessThan, lit_number(3.0))],
+            );
+            let value = eval(&expr).expect("eval should succeed");
+            check_boolean(true, &value).assert();
+        }
+
+        #[test]
+        fn eval_chained_comparison_false() {
+            // 1 < 2 < 1.5  → false (2 < 1.5 fails)
+            let expr = compare_chained(
+                lit_number(1.0),
+                ir::ComparisonOp::LessThan,
+                lit_number(2.0),
+                vec![(ir::ComparisonOp::LessThan, lit_number(1.5))],
+            );
+            let value = eval(&expr).expect("eval should succeed");
+            check_boolean(false, &value).assert();
+        }
+
+        #[test]
+        fn eval_comparison_type_mismatch() {
+            let expr = compare(ir::ComparisonOp::LessThan, lit_number(1.0), lit_bool(true));
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            check_type_mismatch(
+                &errors[0],
+                &ExpectedType::Number { number_type: None },
+                &ValueType::Boolean,
+            )
+            .assert();
+        }
+
+        #[test]
+        fn eval_collects_errors_from_comparison_operands() {
+            // Left and both right operands fail independently.
+            let expr = compare_chained(
+                unary(ir::UnaryOp::Not, lit_number(1.0)),
+                ir::ComparisonOp::LessThan,
+                unary(ir::UnaryOp::Not, lit_number(2.0)),
+                vec![(
+                    ir::ComparisonOp::LessThan,
+                    unary(ir::UnaryOp::Not, lit_number(3.0)),
+                )],
+            );
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 3);
+            check_invalid_type(&errors[0], &ExpectedType::Boolean, &scalar_number_type()).assert();
+            check_invalid_type(&errors[1], &ExpectedType::Boolean, &scalar_number_type()).assert();
+            check_invalid_type(&errors[2], &ExpectedType::Boolean, &scalar_number_type()).assert();
+        }
+    }
+
+    mod fallback {
+        use super::*;
+
+        #[test]
+        fn eval_fallback_uses_left_when_successful() {
+            let expr = fallback(lit_number(1.0), lit_number(2.0));
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(1.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_fallback_propagates_non_python_errors() {
+            // Left fails with a type error (not a PythonEvalError), so fallback
+            // must not evaluate the right side.
+            let expr = fallback(unary(ir::UnaryOp::Not, lit_number(1.0)), lit_number(2.0));
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            check_invalid_type(&errors[0], &ExpectedType::Boolean, &scalar_number_type()).assert();
+        }
+    }
+
+    mod unit_cast {
+        use super::*;
+
+        #[test]
+        fn eval_cast_number_to_meters() {
+            let unit = ir_composite_unit([UnitSpec::new(None, Some("m"), false, 1.0)]);
+            let expr = unit_cast(lit_number(5.0), unit);
+            let value = eval(&expr).expect("eval should succeed");
+
+            let Value::MeasuredNumber(measured) = value else {
+                panic!("expected measured number, got {value:?}");
+            };
+
+            let Number::Scalar(scalar) = *measured.normalized_value().as_number() else {
+                panic!("expected scalar");
+            };
+            check_is_close(5.0, scalar).assert();
+            check_units_dimensionally_eq([(Dimension::Distance, 1.0)], measured.unit()).assert();
+            check_is_close(1.0, measured.unit().magnitude).assert();
+        }
+
+        #[test]
+        fn eval_cast_number_to_kilometers() {
+            let unit = ir_composite_unit([UnitSpec::new(Some("k"), Some("m"), false, 1.0)]);
+            let expr = unit_cast(lit_number(2.0), unit);
+            let value = eval(&expr).expect("eval should succeed");
+
+            let Value::MeasuredNumber(measured) = value else {
+                panic!("expected measured number, got {value:?}");
+            };
+
+            // 2 km = 2000 m in normalized SI units
+            let Number::Scalar(scalar) = *measured.normalized_value().as_number() else {
+                panic!("expected scalar");
+            };
+            check_is_close(2000.0, scalar).assert();
+            check_units_dimensionally_eq([(Dimension::Distance, 1.0)], measured.unit()).assert();
+            check_is_close(1000.0, measured.unit().magnitude).assert();
+        }
+
+        #[test]
+        fn eval_cast_rejects_boolean() {
+            let unit = ir_composite_unit([UnitSpec::new(None, Some("m"), false, 1.0)]);
+            let expr = unit_cast(lit_bool(true), unit);
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            check_type_mismatch(
+                &errors[0],
+                &ExpectedType::NumberOrMeasuredNumber { number_type: None },
+                &ValueType::Boolean,
+            )
+            .assert();
+        }
+
+        #[test]
+        fn eval_cast_unit_mismatch() {
+            // First cast to meters, then attempt to cast the measured value to seconds.
+            let meters = ir_composite_unit([UnitSpec::new(None, Some("m"), false, 1.0)]);
+            let seconds = ir_composite_unit([UnitSpec::new(None, Some("s"), false, 1.0)]);
+            let measured = unit_cast(lit_number(1.0), meters);
+            let expr = unit_cast(measured, seconds);
+
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            assert!(
+                matches!(
+                    &errors[0],
+                    EvalError::UnitMismatch {
+                        expected_unit: DisplayUnit::Unit { name: expected, exponent: 1.0 },
+                        found_unit: DisplayUnit::Unit { name: found, exponent: 1.0 },
+                        ..
+                    } if expected == "m" && found == "s"
+                ),
+                "expected UnitMismatch m vs s, got {:?}",
+                errors[0]
+            );
+        }
+    }
+
+    mod variables {
+        use super::*;
+
+        #[test]
+        fn eval_builtin_pi() {
+            let expr = builtin_var("pi");
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(PI, &value).assert();
+        }
+
+        #[test]
+        fn eval_builtin_e() {
+            let expr = builtin_var("e");
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(E, &value).assert();
+        }
+
+        #[test]
+        fn eval_parameter_lookup() {
+            let mut external = TestExternalContext::new();
+            let mut context = EvalContext::new(&mut external);
+            let model = EvalInstanceKey::root(test_model_path("test"));
+            context.push_active_model(model);
+            context.add_parameter_result(
+                ParameterName::from("x"),
+                Ok(output_parameter("x", Value::Number(Number::Scalar(10.0)))),
+            );
+
+            let value = eval_expr(&param_var("x"), &mut context)
+                .expect("eval should succeed")
+                .0;
+            check_scalar_close(10.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_parameter_in_arithmetic() {
+            let mut external = TestExternalContext::new();
+            let mut context = EvalContext::new(&mut external);
+            context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
+            context.add_parameter_result(
+                ParameterName::from("x"),
+                Ok(output_parameter("x", Value::Number(Number::Scalar(3.0)))),
+            );
+
+            let expr = binary(ir::BinaryOp::Add, param_var("x"), lit_number(2.0));
+            let value = eval_expr(&expr, &mut context)
+                .expect("eval should succeed")
+                .0;
+            check_scalar_close(5.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_missing_parameter() {
+            let mut external = TestExternalContext::new();
+            let mut context = EvalContext::new(&mut external);
+            let model = EvalInstanceKey::root(test_model_path("test"));
+            context.push_active_model(model.clone());
+
+            let errors =
+                eval_expr(&param_var("missing"), &mut context).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            assert!(
+                matches!(
+                    &errors[0],
+                    EvalError::ParameterHasError {
+                        parameter_name,
+                        parameter_instance_key,
+                        ..
+                    } if parameter_name.as_str() == "missing"
+                        && parameter_instance_key == &model
+                ),
+                "expected ParameterHasError for missing, got {:?}",
+                errors[0]
+            );
+        }
+
+        #[test]
+        fn eval_external_parameter_lookup() {
+            let mut external = TestExternalContext::new();
+            let mut context = EvalContext::new(&mut external);
+
+            let parent = EvalInstanceKey::root(test_model_path("parent"));
+            let child = EvalInstanceKey::root(test_model_path("child"));
+
+            context.add_parameter_result_to(
+                &child,
+                ParameterName::from("y"),
+                Ok(output_parameter("y", Value::Number(Number::Scalar(7.0)))),
+            );
+
+            context.push_active_model(parent);
+            context.add_reference(ReferenceName::from("child"), child);
+
+            let value = eval_expr(&external_var("y", "child"), &mut context)
+                .expect("eval should succeed")
+                .0;
+            check_scalar_close(7.0, &value).assert();
+        }
+    }
+
+    mod function_calls {
+        use super::*;
+
+        #[test]
+        fn eval_builtin_abs() {
+            let expr = builtin_call("abs", vec![lit_number(-4.0)]);
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(4.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_builtin_sqrt() {
+            let expr = builtin_call("sqrt", vec![lit_number(9.0)]);
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(3.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_imported_function() {
+            let mut external = TestExternalContext::new();
+            external.register_imported_function(
+                PythonPath::from_str_no_ext("helpers"),
+                PyFunctionName::from("double"),
+                |args| {
+                    let Value::Number(Number::Scalar(n)) = &args[0].0 else {
+                        panic!("expected scalar argument");
+                    };
+                    Ok(Value::Number(Number::Scalar(n * 2.0)))
+                },
+            );
+
+            let mut context = EvalContext::new(&mut external);
+            context.set_evaluation_cache_root(test_model_path("test"));
+
+            let expr = imported_call("helpers", "double", vec![lit_number(21.0)]);
+            let value = eval_expr(&expr, &mut context)
+                .expect("eval should succeed")
+                .0;
+            check_scalar_close(42.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_imported_function_python_error() {
+            let mut external = TestExternalContext::new();
+            external.register_imported_function(
+                PythonPath::from_str_no_ext("helpers"),
+                PyFunctionName::from("fail"),
+                |_args| {
+                    Err(Box::new(EvalError::PythonEvalError {
+                        function_name: PyFunctionName::from("fail"),
+                        function_call_span: Span::synthetic(),
+                        message: "boom".to_string(),
+                        traceback: Some("traceback".to_string()),
+                    }))
+                },
+            );
+
+            let mut context = EvalContext::new(&mut external);
+            context.set_evaluation_cache_root(test_model_path("test"));
+
+            let expr = imported_call("helpers", "fail", vec![lit_number(1.0)]);
+            let errors = eval_expr(&expr, &mut context).expect_err("eval should fail");
+            assert_eq!(errors.len(), 1);
+            assert!(
+                matches!(
+                    &errors[0],
+                    EvalError::PythonEvalError {
+                        function_name,
+                        message,
+                        traceback: Some(traceback),
+                        ..
+                    } if function_name.as_str() == "fail"
+                        && message == "boom"
+                        && traceback == "traceback"
+                ),
+                "expected PythonEvalError, got {:?}",
+                errors[0]
+            );
+        }
+
+        #[test]
+        fn eval_fallback_uses_right_on_python_error() {
+            let mut external = TestExternalContext::new();
+            external.register_imported_function(
+                PythonPath::from_str_no_ext("helpers"),
+                PyFunctionName::from("fail"),
+                |_args| {
+                    Err(Box::new(EvalError::PythonEvalError {
+                        function_name: PyFunctionName::from("fail"),
+                        function_call_span: Span::synthetic(),
+                        message: "boom".to_string(),
+                        traceback: None,
+                    }))
+                },
+            );
+
+            let mut context = EvalContext::new(&mut external);
+            context.set_evaluation_cache_root(test_model_path("test"));
+
+            let expr = fallback(
+                imported_call("helpers", "fail", vec![lit_number(1.0)]),
+                lit_number(99.0),
+            );
+            let value = eval_expr(&expr, &mut context)
+                .expect("eval should succeed")
+                .0;
+            check_scalar_close(99.0, &value).assert();
+
+            let warnings = context.take_expression_warnings();
+            assert_eq!(warnings.len(), 1);
+            assert!(
+                matches!(
+                    &warnings[0],
+                    output::EvalWarning::UsedFallback {
+                        function_name,
+                        message,
+                        ..
+                    } if function_name.as_str() == "fail" && message == "boom"
+                ),
+                "expected UsedFallback warning, got {:?}",
+                warnings[0]
+            );
+        }
+
+        #[test]
+        fn eval_function_call_collects_arg_errors() {
+            let expr = builtin_call(
+                "abs",
+                vec![
+                    unary(ir::UnaryOp::Not, lit_number(1.0)),
+                    unary(ir::UnaryOp::Not, lit_number(2.0)),
+                ],
+            );
+            let errors = eval(&expr).expect_err("eval should fail");
+            assert_eq!(errors.len(), 2);
+            check_invalid_type(&errors[0], &ExpectedType::Boolean, &scalar_number_type()).assert();
+            check_invalid_type(&errors[1], &ExpectedType::Boolean, &scalar_number_type()).assert();
+        }
+    }
+
+    mod nested {
+        use super::*;
+
+        #[test]
+        fn eval_nested_arithmetic() {
+            // (2 + 3) * 4
+            let expr = binary(
+                ir::BinaryOp::Mul,
+                binary(ir::BinaryOp::Add, lit_number(2.0), lit_number(3.0)),
+                lit_number(4.0),
+            );
+            let value = eval(&expr).expect("eval should succeed");
+            check_scalar_close(20.0, &value).assert();
+        }
+
+        #[test]
+        fn eval_comparison_of_arithmetic() {
+            // (1 + 2) == 3
+            let expr = compare(
+                ir::ComparisonOp::Eq,
+                binary(ir::BinaryOp::Add, lit_number(1.0), lit_number(2.0)),
+                lit_number(3.0),
+            );
+            let value = eval(&expr).expect("eval should succeed");
+            check_boolean(true, &value).assert();
+        }
+    }
+}

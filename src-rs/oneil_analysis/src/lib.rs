@@ -4,6 +4,7 @@
 mod context;
 mod dep_graph;
 mod dependency;
+pub mod display;
 mod independents;
 pub mod output;
 mod validation;
@@ -16,3 +17,8 @@ pub use validation::validate_instance_graph;
 // `oneil_frontend`; re-exported here so existing callers (runtime, snapshot
 // tests) keep importing them from `oneil_analysis`.
 pub use oneil_frontend::{HostLocation, InstanceValidationError, InstanceValidationErrorKind};
+
+#[cfg(test)]
+mod test_assertions;
+#[cfg(test)]
+mod test_fixtures;

@@ -1062,15 +1062,14 @@ fn navigate_in_subtree<'a>(
     for seg in segments {
         if let Some(sub) = current.submodels().get(seg) {
             current = sub.instance.as_ref();
-        } else if let Some(alias) = current.aliases().get(seg) {
+        } else {
+            let alias = current.aliases().get(seg)?;
             // Follow the alias path through the submodel tree.
             let mut resolved = current;
             for alias_seg in alias.alias_path.segments() {
                 resolved = resolved.submodels().get(alias_seg)?.instance.as_ref();
             }
             current = resolved;
-        } else {
-            return None;
         }
     }
     Some(current)
@@ -1284,11 +1283,11 @@ fn classify_variable(variable: &mut ir::Variable, scope: &ClassifyScope<'_>) {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
-    use oneil_ir as ir;
-    use oneil_shared::{
-        span::Span,
-        symbols::{BuiltinValueName, ParameterName, ReferenceName},
+    use oneil_ir::{
+        self as ir,
+        test_helpers::expr::{builtin_variable, external_variable, parameter_variable},
     };
+    use oneil_shared::symbols::ParameterName;
 
     use super::{BuiltinLookup, ClassifyScope, classify_variable};
 
@@ -1321,7 +1320,7 @@ mod tests {
             builtins: &builtins,
         };
 
-        let mut var = ir::Variable::parameter(name.clone(), Span::synthetic());
+        let mut var = parameter_variable(name.as_str());
         classify_variable(&mut var, &scope);
 
         match var {
@@ -1343,7 +1342,7 @@ mod tests {
             builtins: &builtins,
         };
 
-        let mut var = ir::Variable::parameter(ParameterName::from("pi"), Span::synthetic());
+        let mut var = parameter_variable("pi");
         classify_variable(&mut var, &scope);
 
         match var {
@@ -1364,8 +1363,7 @@ mod tests {
             builtins: &builtins,
         };
 
-        let mut var =
-            ir::Variable::builtin(BuiltinValueName::new("pi".to_string()), Span::synthetic());
+        let mut var = builtin_variable("pi");
         classify_variable(&mut var, &scope);
 
         match var {
@@ -1387,7 +1385,7 @@ mod tests {
             builtins: &builtins,
         };
 
-        let mut var = ir::Variable::parameter(ParameterName::from("ghost"), Span::synthetic());
+        let mut var = parameter_variable("ghost");
         classify_variable(&mut var, &scope);
 
         match var {
@@ -1409,12 +1407,7 @@ mod tests {
             builtins: &builtins,
         };
 
-        let mut var = ir::Variable::external(
-            ReferenceName::new("r".to_string()),
-            Span::synthetic(),
-            ParameterName::from("p"),
-            Span::synthetic(),
-        );
+        let mut var = external_variable("p", "r");
         classify_variable(&mut var, &scope);
 
         match var {

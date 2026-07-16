@@ -8,7 +8,10 @@
 
 use std::path::PathBuf;
 
-use crate::util::run_model_and_format;
+use crate::util::{
+    run_dependency_tree_and_format, run_independents_and_format, run_model_and_format,
+    run_reference_tree_and_format,
+};
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -25,6 +28,30 @@ fn manifest_dir() -> PathBuf {
 /// detects it and applies it to the declared target model.
 fn run_fixture(name: &str) -> String {
     run_model_and_format(&fixture_path(name), Some(manifest_dir().as_path()))
+}
+
+fn run_dep_tree(name: &str, parameter: &str) -> String {
+    run_dependency_tree_and_format(
+        &fixture_path(name),
+        parameter,
+        Some(manifest_dir().as_path()),
+    )
+}
+
+fn run_ref_tree(name: &str, parameter: &str) -> String {
+    run_reference_tree_and_format(
+        &fixture_path(name),
+        parameter,
+        Some(manifest_dir().as_path()),
+    )
+}
+
+fn run_independents(name: &str, recursive: bool) -> String {
+    run_independents_and_format(
+        &fixture_path(name),
+        recursive,
+        Some(manifest_dir().as_path()),
+    )
 }
 
 // =============================================================================
@@ -358,4 +385,108 @@ fn chain_apply_validation_cycle() {
 #[test]
 fn python_square_area() {
     insta::assert_snapshot!(run_fixture("python/python_square_area.on"));
+}
+
+// =============================================================================
+// Analysis: dependency tree, reference tree, independents
+// =============================================================================
+
+#[test]
+fn analysis_dependency_tree_basic_force() {
+    // `f = m * a` — dependency tree should include both local leaves.
+    insta::assert_snapshot!(run_dep_tree("basic/basic.on", "f"));
+}
+
+/// Snapshots a dependency-tree leaf with no children.
+#[test]
+fn analysis_dependency_tree_leaf() {
+    insta::assert_snapshot!(run_dep_tree("basic/basic.on", "m"));
+}
+
+/// Snapshots a three-parameter transitive dependency chain.
+#[test]
+fn analysis_dependency_tree_transitive_chain() {
+    // `c = h * 2`, `h = g * 2`, and `g` is a leaf.
+    insta::assert_snapshot!(run_dep_tree("gravity_mars.on", "c"));
+}
+
+/// Snapshots dependency analysis for a parameter absent from a valid model.
+#[test]
+fn analysis_dependency_tree_missing_parameter() {
+    insta::assert_snapshot!(run_dep_tree("basic/basic.on", "missing"));
+}
+
+#[test]
+fn analysis_reference_tree_basic_mass() {
+    // `m` is referenced by `f` and (indirectly) by the force threshold test.
+    insta::assert_snapshot!(run_ref_tree("basic/basic.on", "m"));
+}
+
+/// Snapshots a reference-tree leaf with no consumers.
+#[test]
+fn analysis_reference_tree_leaf() {
+    insta::assert_snapshot!(run_ref_tree("gravity_mars.on", "c"));
+}
+
+/// Snapshots a three-parameter transitive reference chain.
+#[test]
+fn analysis_reference_tree_transitive_chain() {
+    insta::assert_snapshot!(run_ref_tree("gravity_mars.on", "g"));
+}
+
+/// Snapshots a failed test as a parameter consumer.
+#[test]
+fn analysis_reference_tree_failed_test() {
+    insta::assert_snapshot!(run_ref_tree("basic/failing_test.on", "m"));
+}
+
+#[test]
+fn analysis_independents_basic() {
+    // Leaf params `m`, `a`, and `t` are independent; `f` is not.
+    insta::assert_snapshot!(run_independents("basic/basic.on", false));
+}
+
+/// Snapshots independent selection across a transitive local chain.
+#[test]
+fn analysis_independents_transitive_chain() {
+    // Only `g` is independent; `h` and `c` have parameter dependencies.
+    insta::assert_snapshot!(run_independents("gravity_mars.on", false));
+}
+
+/// Snapshots independents analysis when model loading fails.
+#[test]
+fn analysis_independents_failed_model() {
+    insta::assert_snapshot!(run_independents("basic/syntax_error.on", false));
+}
+
+/// Snapshots non-recursive output for a model with an external reference.
+#[test]
+fn analysis_independents_non_recursive_with_ref() {
+    // Only top-level `m` is printed; the referenced planet is omitted.
+    insta::assert_snapshot!(run_independents("analysis/force_with_ref.on", false));
+}
+
+/// Snapshots independents output when reference validation fails.
+#[test]
+fn analysis_independents_with_reference_error() {
+    // The diagnostic is retained and no top-model independents are emitted.
+    insta::assert_snapshot!(run_independents("ref_undefined_param/consumer.on", false));
+}
+
+#[test]
+fn analysis_dependency_tree_with_external() {
+    // `f = m * g.planet` — external edge + local mass.
+    insta::assert_snapshot!(run_dep_tree("analysis/force_with_ref.on", "f"));
+}
+
+#[test]
+fn analysis_reference_tree_with_external_consumer() {
+    // Local `m` is consumed by `f` (which also depends on an external).
+    insta::assert_snapshot!(run_ref_tree("analysis/force_with_ref.on", "m"));
+}
+
+#[test]
+fn analysis_independents_recursive_with_ref() {
+    // Top-level `m` plus planet `g` when printing recursively.
+    insta::assert_snapshot!(run_independents("analysis/force_with_ref.on", true));
 }

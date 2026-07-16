@@ -149,3 +149,243 @@ fn eval_test<E: ExternalEvaluationContext>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use oneil_ir::{
+        self as ir,
+        test_helpers::{
+            expr::{compare, fallback, imported_call, lit_bool, lit_number, param_var, unary},
+            parameter::{
+                builtin_dependencies_singleton, external_dependencies_singleton,
+                parameter_dependencies_singleton,
+            },
+            test::make_test,
+        },
+    };
+    use oneil_output::{
+        self as output, EvalError, ExpectedType, Number, NumberType, TestResult, Value, ValueType,
+    };
+    use oneil_shared::{
+        EvalInstanceKey,
+        paths::PythonPath,
+        span::Span,
+        symbols::{BuiltinValueName, ParameterName, PyFunctionName, ReferenceName},
+    };
+
+    use crate::{
+        check_is_close,
+        context::EvalContext,
+        test_context::{TestExternalContext, test_model_path},
+        test_fixtures::{output_parameter, with_root_context},
+    };
+
+    use super::*;
+
+    /// Evaluates `test` with a fresh context and no pre-seeded parameters.
+    fn eval_test_simple(test: &ir::Test) -> Result<output::Test, Vec<EvalError>> {
+        with_root_context(|context| eval_test(test, context))
+    }
+
+    #[test]
+    fn eval_test_passes_on_true() {
+        let test = make_test(lit_bool(true), ir::Dependencies::new());
+        let result = eval_test_simple(&test).expect("eval should succeed");
+        assert!(matches!(result.result, TestResult::Passed));
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn eval_test_fails_on_false_with_empty_debug_info() {
+        let test = make_test(lit_bool(false), ir::Dependencies::new());
+        let result = eval_test_simple(&test).expect("eval should succeed");
+        let TestResult::Failed { debug_info } = result.result else {
+            panic!("expected Failed, got {:?}", result.result);
+        };
+        assert!(debug_info.builtin_dependency_values.is_empty());
+        assert!(debug_info.parameter_dependency_values.is_empty());
+        assert!(debug_info.external_dependency_values.is_empty());
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn eval_test_fails_with_parameter_dependency_values() {
+        let dependencies = parameter_dependencies_singleton("x");
+
+        // x > 10  with x = 5 → false
+        let expr = compare(
+            ir::ComparisonOp::GreaterThan,
+            param_var("x"),
+            lit_number(10.0),
+        );
+        let test = make_test(expr, dependencies);
+
+        let mut external = TestExternalContext::new();
+        let mut context = EvalContext::new(&mut external);
+        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
+        context.add_parameter_result(
+            ParameterName::from("x"),
+            Ok(output_parameter("x", Value::Number(Number::Scalar(5.0)))),
+        );
+
+        let result = eval_test(&test, &mut context).expect("eval should succeed");
+        let TestResult::Failed { debug_info } = result.result else {
+            panic!("expected Failed, got {:?}", result.result);
+        };
+
+        assert_eq!(debug_info.parameter_dependency_values.len(), 1);
+        let value = debug_info
+            .parameter_dependency_values
+            .get(&ParameterName::from("x"))
+            .expect("x should be in debug info");
+        let Value::Number(Number::Scalar(n)) = value else {
+            panic!("expected scalar, got {value:?}");
+        };
+        check_is_close(5.0, *n).assert();
+    }
+
+    #[test]
+    fn eval_test_fails_with_builtin_dependency_values() {
+        let dependencies = builtin_dependencies_singleton("pi");
+
+        let test = make_test(lit_bool(false), dependencies);
+        let result = eval_test_simple(&test).expect("eval should succeed");
+        let TestResult::Failed { debug_info } = result.result else {
+            panic!("expected Failed, got {:?}", result.result);
+        };
+
+        assert_eq!(debug_info.builtin_dependency_values.len(), 1);
+        let value = debug_info
+            .builtin_dependency_values
+            .get(&BuiltinValueName::from("pi"))
+            .expect("pi should be in debug info");
+        let Value::Number(Number::Scalar(n)) = value else {
+            panic!("expected scalar, got {value:?}");
+        };
+        check_is_close(PI, *n).assert();
+    }
+
+    #[test]
+    fn eval_test_fails_with_external_dependency_values() {
+        let dependencies = external_dependencies_singleton("y", "child");
+
+        let test = make_test(lit_bool(false), dependencies);
+
+        let mut external = TestExternalContext::new();
+        let mut context = EvalContext::new(&mut external);
+
+        let parent = EvalInstanceKey::root(test_model_path("parent"));
+        let child = EvalInstanceKey::root(test_model_path("child"));
+        context.add_parameter_result_to(
+            &child,
+            ParameterName::from("y"),
+            Ok(output_parameter("y", Value::Number(Number::Scalar(7.0)))),
+        );
+        context.push_active_model(parent);
+        context.add_reference(ReferenceName::from("child"), child);
+
+        let result = eval_test(&test, &mut context).expect("eval should succeed");
+        let TestResult::Failed { debug_info } = result.result else {
+            panic!("expected Failed, got {:?}", result.result);
+        };
+
+        assert_eq!(debug_info.external_dependency_values.len(), 1);
+        let key = (ReferenceName::from("child"), ParameterName::from("y"));
+        let value = debug_info
+            .external_dependency_values
+            .get(&key)
+            .expect("y.child should be in debug info");
+        let Value::Number(Number::Scalar(n)) = value else {
+            panic!("expected scalar, got {value:?}");
+        };
+        check_is_close(7.0, *n).assert();
+    }
+
+    #[test]
+    fn eval_test_rejects_non_boolean_result() {
+        let test = make_test(lit_number(1.0), ir::Dependencies::new());
+        let errors = eval_test_simple(&test).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::InvalidType {
+                    expected_type: ExpectedType::Boolean,
+                    found_type: ValueType::Number {
+                        number_type: NumberType::Scalar
+                    },
+                    ..
+                }
+            ),
+            "expected InvalidType Boolean vs Scalar, got {:?}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn eval_test_propagates_expression_errors() {
+        // !1 is a type error
+        let expr = unary(ir::UnaryOp::Not, lit_number(1.0));
+        let test = make_test(expr, ir::Dependencies::new());
+        let errors = eval_test_simple(&test).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::InvalidType {
+                    expected_type: ExpectedType::Boolean,
+                    found_type: ValueType::Number {
+                        number_type: NumberType::Scalar
+                    },
+                    ..
+                }
+            ),
+            "expected InvalidType Boolean vs Scalar, got {:?}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn eval_test_collects_fallback_warnings_on_pass() {
+        let mut external = TestExternalContext::new();
+        external.register_imported_function(
+            PythonPath::from_str_no_ext("helpers"),
+            PyFunctionName::from("fail"),
+            |_args| {
+                Err(Box::new(EvalError::PythonEvalError {
+                    function_name: PyFunctionName::from("fail"),
+                    function_call_span: Span::synthetic(),
+                    message: "boom".to_string(),
+                    traceback: None,
+                }))
+            },
+        );
+
+        let mut context = EvalContext::new(&mut external);
+        context.set_evaluation_cache_root(test_model_path("test"));
+        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
+
+        // (fail() ? true)  → passes, with a UsedFallback warning
+        let left = imported_call("helpers", "fail", vec![]);
+        let expr = fallback(left, lit_bool(true));
+        let test = make_test(expr, ir::Dependencies::new());
+
+        let result = eval_test(&test, &mut context).expect("eval should succeed");
+        assert!(matches!(result.result, TestResult::Passed));
+        assert_eq!(result.warnings.len(), 1);
+        assert!(
+            matches!(
+                &result.warnings[0],
+                output::EvalWarning::UsedFallback {
+                    function_name,
+                    message,
+                    ..
+                } if function_name.as_str() == "fail" && message == "boom"
+            ),
+            "expected UsedFallback warning, got {:?}",
+            result.warnings[0]
+        );
+    }
+}

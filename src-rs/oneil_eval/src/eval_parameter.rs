@@ -16,6 +16,7 @@ use crate::{
     eval_expr, eval_unit,
 };
 
+#[derive(Debug)]
 pub struct EvalParameterResult {
     pub value: Value,
     pub expr_span: Span,
@@ -35,9 +36,6 @@ pub fn eval_parameter<E: ExternalEvaluationContext>(
     parameter: &ir::Parameter,
     context: &mut EvalContext<'_, E>,
 ) -> Result<EvalParameterResult, Vec<EvalError>> {
-    // TODO: this is about where we would use `trace_level`, but I'm not yet sure
-    //       how to handle it.
-
     // Overlay RHSes have already been applied to `parameter.value()` by
     // the design composition step, and any anchor-scope handling is
     // expressed through [`ir::DesignProvenance::anchor_path`] which the
@@ -183,7 +181,7 @@ fn get_piecewise_result<'a, E: ExternalEvaluationContext>(
 
     // then, check if there are multiple matching branches
     if matching_branches.len() > 1 {
-        let matching_branche_spans = matching_branches
+        let matching_branch_spans = matching_branches
             .into_iter()
             .map(|(_, _, if_expr_span)| if_expr_span.clone())
             .collect();
@@ -191,7 +189,7 @@ fn get_piecewise_result<'a, E: ExternalEvaluationContext>(
         return Err(vec![EvalError::MultiplePiecewiseBranchesMatch {
             param_ident,
             param_ident_span,
-            matching_branche_spans,
+            matching_branch_spans,
         }]);
     }
 
@@ -935,238 +933,102 @@ pub fn get_external_dependency_values<E: ExternalEvaluationContext>(
 
 #[cfg(test)]
 mod tests {
-    use oneil_output::Dimension;
+    use oneil_ir::{
+        self as ir,
+        test_helpers::{
+            expr::{lit_bool, lit_number, lit_string, param_var},
+            parameter::{
+                build_binary_parameter, build_exponent_parameter, build_literal_parameter,
+                build_parameter_from_expr, build_piecewise_parameter, build_simple_parameter,
+                continuous_limits, discrete_limits,
+            },
+            unit::{UnitSpec, build_resolved_units},
+        },
+    };
+    use oneil_output::{Dimension, EvalError, Number, Value, util::is_close};
     use oneil_shared::EvalInstanceKey;
 
     use crate::{
-        assert_is_close, assert_units_dimensionally_eq,
+        check_is_close, check_param_measured_scalar, check_param_scalar_close,
         context::EvalContext,
         test_context::{TestExternalContext, test_model_path},
+        test_fixtures::{eval_parameter_simple, setup_context_with_parameters},
     };
 
     use super::*;
 
     #[test]
-    fn eval_no_unit() {
-        // setup parameter and context
-        let parameter = helper::build_simple_parameter("x", 1.0, []);
-        let mut external = TestExternalContext::new();
-        let mut context = EvalContext::new(&mut external);
-        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-
-        let parameter_value =
-            eval_parameter(&parameter, &mut context).expect("eval should succeed");
-
-        // check the parameter value
-        let Value::Number(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let Number::Scalar(value) = number else {
-            panic!("expected scalar");
-        };
-
-        // check the value
-        assert_is_close!(1.0, value);
-    }
-
-    #[test]
-    fn eval_with_unit_m() {
-        // setup parameter and context
-        let parameter = helper::build_simple_parameter(
-            "x",
-            1.0,
-            [helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-        );
-        let mut external = TestExternalContext::new();
-        let mut context = EvalContext::new(&mut external);
-        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-
-        let parameter_value =
-            eval_parameter(&parameter, &mut context).expect("eval should succeed");
-
-        let expected_dimensions = [(Dimension::Distance, 1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
-        // check the value
-        assert_is_close!(1.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
-    }
-
-    #[test]
-    fn eval_with_unit_km() {
-        // setup parameter and context
-        let parameter = helper::build_simple_parameter(
-            "x",
-            1.0,
-            [helper::UnitSpec::new(Some("m"), Some("k"), false, 1.0)],
-        );
-        let mut external = TestExternalContext::new();
-        let mut context = EvalContext::new(&mut external);
-        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-
-        let parameter_value =
-            eval_parameter(&parameter, &mut context).expect("eval should succeed");
-
-        let expected_dimensions = [(Dimension::Distance, 1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
-        // check the value
-        // 1.0 km = 1000.0 m
-        assert_is_close!(1000.0, value);
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1000.0, unit.magnitude);
-        assert!(!unit.is_db);
-    }
-
-    #[test]
-    fn eval_with_unit_km_per_hr() {
-        // setup parameter and context
-        let parameter = helper::build_simple_parameter(
-            "x",
-            1.0,
-            [
-                helper::UnitSpec::new(Some("m"), Some("k"), false, 1.0),
-                helper::UnitSpec::new(Some("hr"), None, false, -1.0),
-            ],
-        );
-        let mut external = TestExternalContext::new();
-        let mut context = EvalContext::new(&mut external);
-        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-
-        let parameter_value =
-            eval_parameter(&parameter, &mut context).expect("eval should succeed");
-
-        let expected_dimensions = [(Dimension::Distance, 1.0), (Dimension::Time, -1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
-        // check the value
-        // 1.0 km/hr = 1000.0 m / 3600.0 s = 0.277777... m/s
-        assert_is_close!(1000.0 / 3600.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1000.0 / 3600.0, unit.magnitude);
-        assert!(!unit.is_db);
-    }
-
-    #[test]
-    fn eval_with_unit_db() {
-        // setup parameter and context
-        let parameter = helper::build_simple_parameter(
-            "x",
-            1.0,
-            [helper::UnitSpec::new(None, None, true, 1.0)],
-        );
-        let mut external = TestExternalContext::new();
-        let mut context = EvalContext::new(&mut external);
-        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-
-        let parameter_value =
-            eval_parameter(&parameter, &mut context).expect("eval should succeed");
-
-        let expected_dimensions = [];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
-        // check the value
-        // 1.0 dB = 10^(1.0/10.0) = 10^0.1 = 1.258925...
-        assert_is_close!(10.0_f64.powf(0.1), value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(unit.is_db);
-    }
-
-    #[test]
-    fn eval_with_unit_dbw() {
-        // setup parameter and context
-        let parameter = helper::build_simple_parameter(
-            "x",
-            1.0,
-            [helper::UnitSpec::new(Some("W"), None, true, 1.0)],
-        );
-        let mut external = TestExternalContext::new();
-        let mut context = EvalContext::new(&mut external);
-        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-
-        let parameter_value =
-            eval_parameter(&parameter, &mut context).expect("eval should succeed");
-
-        let expected_dimensions = [
-            (Dimension::Mass, 1.0),
-            (Dimension::Distance, 2.0),
-            (Dimension::Time, -3.0),
+    #[expect(clippy::type_complexity)]
+    fn eval_simple_parameters_table() {
+        let cases: &[(
+            &str,
+            f64,
+            &[UnitSpec],
+            Option<(f64, &[(Dimension, f64)], f64, bool)>,
+        )] = &[
+            ("no_unit", 1.0, &[], None),
+            (
+                "m",
+                1.0,
+                &[UnitSpec::new(None, Some("m"), false, 1.0)],
+                Some((1.0, &[(Dimension::Distance, 1.0)], 1.0, false)),
+            ),
+            (
+                "km",
+                1.0,
+                &[UnitSpec::new(Some("k"), Some("m"), false, 1.0)],
+                Some((1000.0, &[(Dimension::Distance, 1.0)], 1000.0, false)),
+            ),
+            (
+                "km_per_hr",
+                1.0,
+                &[
+                    UnitSpec::new(Some("k"), Some("m"), false, 1.0),
+                    UnitSpec::new(None, Some("hr"), false, -1.0),
+                ],
+                Some((
+                    1000.0 / 3600.0,
+                    &[(Dimension::Distance, 1.0), (Dimension::Time, -1.0)],
+                    1000.0 / 3600.0,
+                    false,
+                )),
+            ),
+            (
+                "db",
+                1.0,
+                &[UnitSpec::new(None, None, true, 1.0)],
+                Some((10.0_f64.powf(0.1), &[], 1.0, true)),
+            ),
+            (
+                "dbw",
+                1.0,
+                &[UnitSpec::new(None, Some("W"), true, 1.0)],
+                Some((
+                    10.0_f64.powf(0.1),
+                    &[
+                        (Dimension::Mass, 1.0),
+                        (Dimension::Distance, 2.0),
+                        (Dimension::Time, -3.0),
+                    ],
+                    1.0,
+                    true,
+                )),
+            ),
         ];
 
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
-        // 1.0 dBW = 10^(1.0/10.0) = 10^0.1 = 1.258925...
-        assert_is_close!(10.0_f64.powf(0.1), value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(unit.is_db);
+        for (name, value, units, measured) in cases {
+            let parameter = build_simple_parameter("x", *value, units.iter().copied());
+            let result = eval_parameter_simple(&parameter).unwrap_or_else(|errors| {
+                panic!("{name}: eval should succeed, got {errors:?}");
+            });
+            match measured {
+                None => check_param_scalar_close(&result, *value).assert_with_name(name),
+                Some((normalized, dims, magnitude, is_db)) => {
+                    check_param_measured_scalar(&result, *normalized, dims, *magnitude, *is_db)
+                        .assert_with_name(name);
+                }
+            }
+        }
     }
 
     #[test]
@@ -1175,55 +1037,40 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    1.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
+                ("x", 1.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
                 (
                     "y",
                     1.0,
-                    vec![helper::UnitSpec::new(Some("m"), Some("k"), false, 1.0)],
+                    vec![UnitSpec::new(Some("k"), Some("m"), false, 1.0)],
                 ),
             ],
         );
 
         // setup parameter z = x + y with unit km
-        let parameter = helper::build_add_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::Add,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("m"), Some("k"), false, 1.0)],
+            [UnitSpec::new(Some("k"), Some("m"), false, 1.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [(Dimension::Distance, 1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // x + y = 1.0 m + 1000.0 m = 1001.0 m
         // The value is stored in base units (meters)
-        assert_is_close!(1001.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1000.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            1001.0,
+            &[(Dimension::Distance, 1.0)],
+            1000.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1232,63 +1079,48 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
                 (
                     "x",
                     1.0,
                     vec![
-                        helper::UnitSpec::new(Some("g"), Some("k"), false, 1.0),
-                        helper::UnitSpec::new(Some("m"), None, false, 1.0),
-                        helper::UnitSpec::new(Some("s"), None, false, -2.0),
+                        UnitSpec::new(Some("k"), Some("g"), false, 1.0),
+                        UnitSpec::new(None, Some("m"), false, 1.0),
+                        UnitSpec::new(None, Some("s"), false, -2.0),
                     ],
                 ),
-                (
-                    "y",
-                    1.0,
-                    vec![helper::UnitSpec::new(Some("N"), None, false, 1.0)],
-                ),
+                ("y", 1.0, vec![UnitSpec::new(None, Some("N"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x + y with unit N
-        let parameter = helper::build_add_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::Add,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("N"), None, false, 1.0)],
+            [UnitSpec::new(None, Some("N"), false, 1.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [
-            (Dimension::Mass, 1.0),
-            (Dimension::Distance, 1.0),
-            (Dimension::Time, -2.0),
-        ];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // x + y = 1.0 N + 1.0 N = 2.0 N
         // The value is stored in base units
-        assert_is_close!(2.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            2.0,
+            &[
+                (Dimension::Mass, 1.0),
+                (Dimension::Distance, 1.0),
+                (Dimension::Time, -2.0),
+            ],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1297,60 +1129,41 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    1.0,
-                    vec![helper::UnitSpec::new(Some("W"), None, true, 1.0)],
-                ),
-                (
-                    "y",
-                    1.0,
-                    vec![helper::UnitSpec::new(Some("W"), None, false, 1.0)],
-                ),
+                ("x", 1.0, vec![UnitSpec::new(None, Some("W"), true, 1.0)]),
+                ("y", 1.0, vec![UnitSpec::new(None, Some("W"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x + y with unit W
-        let parameter = helper::build_add_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::Add,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("W"), None, false, 1.0)],
+            [UnitSpec::new(None, Some("W"), false, 1.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [
-            (Dimension::Mass, 1.0),
-            (Dimension::Distance, 2.0),
-            (Dimension::Time, -3.0),
-        ];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // x = 1.0 dBW = 10^(1.0/10.0) = 10^0.1 = 1.258925... W
         // y = 1.0 W
         // x + y = 1.258925... W + 1.0 W = 2.258925... W
-        assert_is_close!(10.0_f64.powf(0.1) + 1.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            10.0_f64.powf(0.1) + 1.0,
+            &[
+                (Dimension::Mass, 1.0),
+                (Dimension::Distance, 2.0),
+                (Dimension::Time, -3.0),
+            ],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1359,51 +1172,31 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
-            [(
-                "x",
-                1.0,
-                vec![helper::UnitSpec::new(Some("W"), None, false, 1.0)],
-            )],
+            [("x", 1.0, vec![UnitSpec::new(None, Some("W"), false, 1.0)])],
         );
 
         // setup parameter y = x^2 with unit W^2
-        let parameter = helper::build_exponent_parameter(
-            "y",
-            "x",
-            2.0,
-            [helper::UnitSpec::new(Some("W"), None, false, 2.0)],
-        );
+        let parameter =
+            build_exponent_parameter("y", "x", 2.0, [UnitSpec::new(None, Some("W"), false, 2.0)]);
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [
-            (Dimension::Mass, 2.0),
-            (Dimension::Distance, 4.0),
-            (Dimension::Time, -6.0),
-        ];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // y = x^2 = (1.0 W)^2 = 1.0 W^2
-        assert_is_close!(1.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            1.0,
+            &[
+                (Dimension::Mass, 2.0),
+                (Dimension::Distance, 4.0),
+                (Dimension::Time, -6.0),
+            ],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1412,54 +1205,35 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    3.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
-                (
-                    "y",
-                    2.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
+                ("x", 3.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
+                ("y", 2.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x * y with unit m^2
-        let parameter = helper::build_mul_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::Mul,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("m"), None, false, 2.0)],
+            [UnitSpec::new(None, Some("m"), false, 2.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [(Dimension::Distance, 2.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // z = x * y = 3.0 m * 2.0 m = 6.0 m^2
-        assert_is_close!(6.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            6.0,
+            &[(Dimension::Distance, 2.0)],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1468,54 +1242,35 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    6.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 2.0)],
-                ),
-                (
-                    "y",
-                    2.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
+                ("x", 6.0, vec![UnitSpec::new(None, Some("m"), false, 2.0)]),
+                ("y", 2.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x / y with unit m
-        let parameter = helper::build_div_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::Div,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("m"), None, false, 1.0)],
+            [UnitSpec::new(None, Some("m"), false, 1.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [(Dimension::Distance, 1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // z = x / y = 6.0 m^2 / 2.0 m = 3.0 m
-        assert_is_close!(3.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            3.0,
+            &[(Dimension::Distance, 1.0)],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1524,59 +1279,33 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    6.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
-                (
-                    "y",
-                    2.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
+                ("x", 6.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
+                ("y", 2.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x // y with unit m
         // Escaped division requires matching units
-        let parameter = helper::build_escaped_div_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::EscapedDiv,
             "x",
             "y",
             [
-                helper::UnitSpec::new(Some("m"), None, false, 1.0),
-                helper::UnitSpec::new(Some("m"), None, false, -1.0),
+                UnitSpec::new(None, Some("m"), false, 1.0),
+                UnitSpec::new(None, Some("m"), false, -1.0),
             ],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // z = x // y = 6.0 m // 2.0 m = 3.0
         // For scalars, escaped division behaves the same as regular division
-        assert_is_close!(3.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(&parameter_value, 3.0, &[], 1.0, false).assert();
     }
 
     #[test]
@@ -1585,56 +1314,37 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    6.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
-                (
-                    "y",
-                    2.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
+                ("x", 6.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
+                ("y", 2.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x -- y with unit m
         // Escaped subtraction requires matching units
-        let parameter = helper::build_escaped_sub_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::EscapedSub,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("m"), None, false, 1.0)],
+            [UnitSpec::new(None, Some("m"), false, 1.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [(Dimension::Distance, 1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // z = x -- y = 6.0 m -- 2.0 m = 4.0 m
         // For scalars, escaped subtraction behaves the same as regular subtraction
-        assert_is_close!(4.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            4.0,
+            &[(Dimension::Distance, 1.0)],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
     #[test]
@@ -1643,625 +1353,364 @@ mod tests {
         let mut external = TestExternalContext::new();
         let mut context = EvalContext::new(&mut external);
         context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
-        helper::setup_context_with_parameters(
+        setup_context_with_parameters(
             &mut context,
             [
-                (
-                    "x",
-                    7.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
-                (
-                    "y",
-                    3.0,
-                    vec![helper::UnitSpec::new(Some("m"), None, false, 1.0)],
-                ),
+                ("x", 7.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
+                ("y", 3.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)]),
             ],
         );
 
         // setup parameter z = x % y with unit m
-        let parameter = helper::build_mod_parameter(
+        let parameter = build_binary_parameter(
             "z",
+            ir::BinaryOp::Mod,
             "x",
             "y",
-            [helper::UnitSpec::new(Some("m"), None, false, 1.0)],
+            [UnitSpec::new(None, Some("m"), false, 1.0)],
         );
 
         let parameter_value =
             eval_parameter(&parameter, &mut context).expect("eval should succeed");
 
-        let expected_dimensions = [(Dimension::Distance, 1.0)];
-
-        // check the parameter value
-        let Value::MeasuredNumber(number) = parameter_value.value else {
-            panic!("expected number");
-        };
-
-        let normalized_value = number.normalized_value();
-        let unit = number.unit();
-
-        let Number::Scalar(value) = *normalized_value.as_number() else {
-            panic!("expected scalar");
-        };
-
         // z = x % y = 7.0 m % 3.0 m = 1.0 m
-        assert_is_close!(1.0, value);
-
-        // check the unit
-        assert_units_dimensionally_eq!(expected_dimensions, unit);
-        assert_is_close!(1.0, unit.magnitude);
-        assert!(!unit.is_db);
+        check_param_measured_scalar(
+            &parameter_value,
+            1.0,
+            &[(Dimension::Distance, 1.0)],
+            1.0,
+            false,
+        )
+        .assert();
     }
 
-    mod helper {
-        use super::*;
+    #[test]
+    fn eval_boolean_literal() {
+        let parameter = build_literal_parameter(
+            "flag",
+            ir::Literal::boolean(true),
+            [],
+            ir::Limits::default(),
+        );
+        let result = eval_parameter_simple(&parameter).expect("eval should succeed");
+        assert_eq!(result.value, Value::Boolean(true));
+        assert!(result.warnings.is_empty());
+    }
 
-        use crate::context::EvalContext;
-        use crate::test_context::TestExternalContext;
-        use oneil_output as output;
+    #[test]
+    fn eval_string_literal() {
+        let parameter = build_literal_parameter(
+            "name",
+            ir::Literal::string("alpha".to_string()),
+            [],
+            ir::Limits::default(),
+        );
+        let result = eval_parameter_simple(&parameter).expect("eval should succeed");
+        assert_eq!(result.value, Value::String("alpha".to_string()));
+    }
 
-        use oneil_ir::DisplayCompositeUnit;
-        use oneil_shared::labels::ParameterLabel;
+    #[test]
+    fn eval_boolean_cannot_have_unit() {
+        let parameter = build_literal_parameter(
+            "flag",
+            ir::Literal::boolean(true),
+            [UnitSpec::new(None, Some("m"), false, 1.0)],
+            ir::Limits::default(),
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], EvalError::BooleanCannotHaveUnit { .. }),
+            "expected BooleanCannotHaveUnit, got {:?}",
+            errors[0]
+        );
+    }
 
-        use oneil_shared::span::Span;
-        use oneil_shared::symbols::{ParameterName, UnitBaseName, UnitName, UnitPrefix};
+    #[test]
+    fn eval_string_cannot_have_unit() {
+        let parameter = build_literal_parameter(
+            "name",
+            ir::Literal::string("alpha".to_string()),
+            [UnitSpec::new(None, Some("m"), false, 1.0)],
+            ir::Limits::default(),
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], EvalError::StringCannotHaveUnit { .. }),
+            "expected StringCannotHaveUnit, got {:?}",
+            errors[0]
+        );
+    }
 
-        /// Returns a dummy span for use in test parameters.
-        ///
-        /// This function creates a span with all fields set to zero.
-        /// It is not intended to be directly tested, but rather used
-        /// as a placeholder when constructing IR nodes for testing.
-        fn random_span() -> Span {
-            Span::synthetic()
-        }
+    #[test]
+    fn eval_rejects_negative_under_default_limits() {
+        let parameter = build_simple_parameter("x", -1.0, []);
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::ParameterValueBelowDefaultLimits {
+                    param_value: Value::Number(Number::Scalar(v)),
+                    ..
+                } if (*v - -1.0).abs() < f64::EPSILON
+            ),
+            "expected ParameterValueBelowDefaultLimits for -1, got {:?}",
+            errors[0]
+        );
+    }
 
-        /// Returns a display composite unit that isn't intended to be tested.
-        fn unimportant_display_composite_unit() -> DisplayCompositeUnit {
-            DisplayCompositeUnit::BaseUnit(ir::DisplayUnit::new("unimportant".to_string(), 1.0))
-        }
+    #[test]
+    fn eval_within_continuous_limits() {
+        let parameter = build_literal_parameter(
+            "x",
+            ir::Literal::number(5.0),
+            [],
+            continuous_limits(lit_number(0.0), lit_number(10.0)),
+        );
+        let result = eval_parameter_simple(&parameter).expect("eval should succeed");
+        let Value::Number(Number::Scalar(v)) = result.value else {
+            panic!("expected scalar, got {:?}", result.value);
+        };
+        check_is_close(5.0, v).assert();
+    }
 
-        /// Specification for a unit in tests.
-        #[derive(Debug, Clone, Copy)]
-        pub struct UnitSpec {
-            /// The base unit name (e.g., "m", "s", "W"). Use `None` for pure dB.
-            pub base_name: Option<&'static str>,
-            /// Optional SI prefix (e.g., "k" for kilo, "m" for milli).
-            pub prefix: Option<&'static str>,
-            /// Whether this is a decibel unit.
-            pub is_db: bool,
-            /// The exponent of the unit.
-            pub exponent: f64,
-        }
+    #[test]
+    fn eval_below_continuous_limits() {
+        let parameter = build_literal_parameter(
+            "x",
+            ir::Literal::number(0.0),
+            [],
+            continuous_limits(lit_number(1.0), lit_number(10.0)),
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::ParameterValueBelowContinuousLimits { .. }
+            ),
+            "expected ParameterValueBelowContinuousLimits, got {:?}",
+            errors[0]
+        );
+    }
 
-        impl UnitSpec {
-            pub const fn new(
-                base_name: Option<&'static str>,
-                prefix: Option<&'static str>,
-                is_db: bool,
-                exponent: f64,
-            ) -> Self {
-                Self {
-                    base_name,
-                    prefix,
-                    is_db,
-                    exponent,
-                }
-            }
-        }
+    #[test]
+    fn eval_above_continuous_limits() {
+        let parameter = build_literal_parameter(
+            "x",
+            ir::Literal::number(11.0),
+            [],
+            continuous_limits(lit_number(1.0), lit_number(10.0)),
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::ParameterValueAboveContinuousLimits { .. }
+            ),
+            "expected ParameterValueAboveContinuousLimits, got {:?}",
+            errors[0]
+        );
+    }
 
-        fn build_full_name(base_name: Option<&str>, prefix: Option<&str>, is_db: bool) -> UnitName {
-            UnitName::new(format!(
-                "{}{}{}",
-                if is_db { "dB" } else { "" },
-                prefix.unwrap_or(""),
-                base_name.unwrap_or("")
-            ))
-        }
+    #[test]
+    fn eval_within_number_discrete_limits() {
+        let parameter = build_literal_parameter(
+            "x",
+            ir::Literal::number(2.0),
+            [],
+            discrete_limits(vec![lit_number(1.0), lit_number(2.0), lit_number(3.0)]),
+        );
+        let result = eval_parameter_simple(&parameter).expect("eval should succeed");
+        assert_eq!(result.value, Value::Number(Number::Scalar(2.0)));
+    }
 
-        fn build_unit_info(
-            base_name: Option<&str>,
-            prefix: Option<&str>,
-            is_db: bool,
-        ) -> ir::UnitInfo {
-            if is_db {
-                ir::UnitInfo::Db {
-                    prefix: prefix.map(|s| UnitPrefix::new(s.to_string())),
-                    base_name: base_name.map(|s| UnitBaseName::new(s.to_string())),
-                }
-            } else {
-                ir::UnitInfo::Standard {
-                    prefix: prefix.map(|s| UnitPrefix::new(s.to_string())),
-                    base_name: UnitBaseName::new(
-                        base_name.expect("base name should be provided").to_string(),
-                    ),
-                }
-            }
-        }
+    #[test]
+    fn eval_not_in_number_discrete_limits() {
+        let parameter = build_literal_parameter(
+            "x",
+            ir::Literal::number(4.0),
+            [],
+            discrete_limits(vec![lit_number(1.0), lit_number(2.0), lit_number(3.0)]),
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::ParameterValueNotInDiscreteLimits { .. }
+            ),
+            "expected ParameterValueNotInDiscreteLimits, got {:?}",
+            errors[0]
+        );
+    }
 
-        fn build_resolved_units(
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> Option<ir::CompositeUnit> {
-            let units: Vec<_> = units
-                .into_iter()
-                .map(|spec| {
-                    let full_name = build_full_name(spec.base_name, spec.prefix, spec.is_db);
-                    let info = build_unit_info(spec.base_name, spec.prefix, spec.is_db);
-                    ir::Unit::new(
-                        random_span(),
-                        full_name,
-                        random_span(),
-                        spec.exponent,
-                        None,
-                        info,
-                    )
-                })
-                .collect();
+    #[test]
+    fn eval_within_string_discrete_limits() {
+        let parameter = build_literal_parameter(
+            "mode",
+            ir::Literal::string("b".to_string()),
+            [],
+            discrete_limits(vec![lit_string("a"), lit_string("b"), lit_string("c")]),
+        );
+        let result = eval_parameter_simple(&parameter).expect("eval should succeed");
+        assert_eq!(result.value, Value::String("b".to_string()));
+    }
 
-            if units.is_empty() {
-                None
-            } else {
-                Some(ir::CompositeUnit::new(
-                    units,
-                    unimportant_display_composite_unit(),
-                    random_span(),
-                    oneil_output::DimensionMap::dimensionless(),
-                ))
-            }
-        }
+    #[test]
+    fn eval_not_in_string_discrete_limits() {
+        let parameter = build_literal_parameter(
+            "mode",
+            ir::Literal::string("z".to_string()),
+            [],
+            discrete_limits(vec![lit_string("a"), lit_string("b"), lit_string("c")]),
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::ParameterValueNotInDiscreteLimits { .. }
+            ),
+            "expected ParameterValueNotInDiscreteLimits, got {:?}",
+            errors[0]
+        );
+    }
 
-        /// Builds a simple parameter with a literal numeric value.
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value` - The numeric value of the parameter
-        /// * `units` - An iterator of `UnitSpec` values
-        ///
-        /// # Returns
-        ///
-        /// A parameter with a literal number expression and the specified units.
-        pub fn build_simple_parameter(
-            name: &str,
-            value: f64,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr = ir::Expr::Literal {
-                span: random_span(),
-                value: ir::Literal::Number(value),
-            };
+    #[test]
+    fn eval_piecewise_selects_matching_branch() {
+        let parameter = build_piecewise_parameter(
+            "x",
+            [
+                (lit_number(1.0), lit_bool(false)),
+                (lit_number(2.0), lit_bool(true)),
+                (lit_number(3.0), lit_bool(false)),
+            ],
+            [],
+        );
+        let result = eval_parameter_simple(&parameter).expect("eval should succeed");
+        assert_eq!(result.value, Value::Number(Number::Scalar(2.0)));
+    }
 
-            let units = build_resolved_units(units);
+    #[test]
+    fn eval_piecewise_no_matching_branch() {
+        let parameter = build_piecewise_parameter(
+            "x",
+            [
+                (lit_number(1.0), lit_bool(false)),
+                (lit_number(2.0), lit_bool(false)),
+            ],
+            [],
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::NoPiecewiseBranchMatch {
+                    param_ident,
+                    ..
+                } if param_ident.as_str() == "x"
+            ),
+            "expected NoPiecewiseBranchMatch for x, got {:?}",
+            errors[0]
+        );
+    }
 
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
+    #[test]
+    fn eval_piecewise_multiple_matching_branches() {
+        let parameter = build_piecewise_parameter(
+            "x",
+            [
+                (lit_number(1.0), lit_bool(true)),
+                (lit_number(2.0), lit_bool(true)),
+            ],
+            [],
+        );
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::MultiplePiecewiseBranchesMatch {
+                    param_ident,
+                    matching_branch_spans,
+                    ..
+                } if param_ident.as_str() == "x" && matching_branch_spans.len() == 2
+            ),
+            "expected MultiplePiecewiseBranchesMatch with 2 spans, got {:?}",
+            errors[0]
+        );
+    }
 
-        /// Builds a parameter with an addition expression.
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value_a` - The name of the first parameter to add
-        /// * `value_b` - The name of the second parameter to add
-        /// * `units` - An iterator of `UnitSpec` values
-        ///
-        /// # Returns
-        ///
-        /// A parameter with an addition binary operation: `value_a + value_b`.
-        pub fn build_add_parameter(
-            name: &str,
-            value_a: &str,
-            value_b: &str,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_a = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_a), random_span()),
-            };
+    #[test]
+    fn eval_piecewise_invalid_if_type() {
+        let parameter = build_piecewise_parameter("x", [(lit_number(1.0), lit_number(0.0))], []);
+        let errors = eval_parameter_simple(&parameter).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(
+                &errors[0],
+                EvalError::InvalidIfExpressionType {
+                    found_value: Value::Number(Number::Scalar(v)),
+                    ..
+                } if is_close(*v, 0.0)
+            ),
+            "expected InvalidIfExpressionType, got {:?}",
+            errors[0]
+        );
+    }
 
-            let expr_b = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_b), random_span()),
-            };
+    #[test]
+    fn eval_measured_value_missing_unit_annotation() {
+        // Seed a measured parameter, then reference it without a unit annotation.
+        let mut external = TestExternalContext::new();
+        let mut context = EvalContext::new(&mut external);
+        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
+        setup_context_with_parameters(
+            &mut context,
+            [("src", 1.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)])],
+        );
 
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::Add,
-                left: Box::new(expr_a),
-                right: Box::new(expr_b),
-            };
+        let parameter =
+            build_parameter_from_expr("dst", param_var("src"), None, ir::Limits::default());
 
-            let units = build_resolved_units(units);
+        let errors = eval_parameter(&parameter, &mut context).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], EvalError::ParameterMissingUnitAnnotation { .. }),
+            "expected ParameterMissingUnitAnnotation, got {:?}",
+            errors[0]
+        );
+    }
 
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
+    #[test]
+    fn eval_parameter_unit_mismatch() {
+        let mut external = TestExternalContext::new();
+        let mut context = EvalContext::new(&mut external);
+        context.push_active_model(EvalInstanceKey::root(test_model_path("test")));
+        setup_context_with_parameters(
+            &mut context,
+            [("src", 1.0, vec![UnitSpec::new(None, Some("m"), false, 1.0)])],
+        );
 
-        /// Builds a parameter with a multiplication expression.
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value_a` - The name of the first parameter to multiply
-        /// * `value_b` - The name of the second parameter to multiply
-        /// * `units` - An iterator of `UnitSpec` values
-        ///
-        /// # Returns
-        ///
-        /// A parameter with a multiplication binary operation: `value_a * value_b`.
-        pub fn build_mul_parameter(
-            name: &str,
-            value_a: &str,
-            value_b: &str,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_a = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_a), random_span()),
-            };
+        // Annotate as seconds while the value is in meters.
+        let parameter = build_parameter_from_expr(
+            "dst",
+            param_var("src"),
+            build_resolved_units([UnitSpec::new(None, Some("s"), false, 1.0)]),
+            ir::Limits::default(),
+        );
 
-            let expr_b = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_b), random_span()),
-            };
-
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::Mul,
-                left: Box::new(expr_a),
-                right: Box::new(expr_b),
-            };
-
-            let units = build_resolved_units(units);
-
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
-
-        /// Builds a parameter with a division expression.
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value_a` - The name of the dividend parameter
-        /// * `value_b` - The name of the divisor parameter
-        /// * `units` - An iterator of `UnitSpec` values
-        ///
-        /// # Returns
-        ///
-        /// A parameter with a division binary operation: `value_a / value_b`.
-        pub fn build_div_parameter(
-            name: &str,
-            value_a: &str,
-            value_b: &str,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_a = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_a), random_span()),
-            };
-
-            let expr_b = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_b), random_span()),
-            };
-
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::Div,
-                left: Box::new(expr_a),
-                right: Box::new(expr_b),
-            };
-
-            let units = build_resolved_units(units);
-
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
-
-        /// Builds a parameter with an escaped division expression.
-        ///
-        /// Escaped division (`//`) requires matching units and uses non-standard
-        /// interval arithmetic (divides min by min and max by max for intervals).
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value_a` - The name of the dividend parameter
-        /// * `value_b` - The name of the divisor parameter
-        /// * `units` - An iterator of unit specs (must match the units of both operands)
-        ///
-        /// # Returns
-        ///
-        /// A parameter with an escaped division binary operation: `value_a // value_b`.
-        pub fn build_escaped_div_parameter(
-            name: &str,
-            value_a: &str,
-            value_b: &str,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_a = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_a), random_span()),
-            };
-
-            let expr_b = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_b), random_span()),
-            };
-
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::EscapedDiv,
-                left: Box::new(expr_a),
-                right: Box::new(expr_b),
-            };
-
-            let units = build_resolved_units(units);
-
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
-
-        /// Builds a parameter with an escaped subtraction expression.
-        ///
-        /// Escaped subtraction (`--`) requires matching units and uses non-standard
-        /// interval arithmetic (subtracts min from min and max from max for intervals).
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value_a` - The name of the minuend parameter
-        /// * `value_b` - The name of the subtrahend parameter
-        /// * `units` - An iterator of unit specs (must match the units of both operands)
-        ///
-        /// # Returns
-        ///
-        /// A parameter with an escaped subtraction binary operation: `value_a -- value_b`.
-        pub fn build_escaped_sub_parameter(
-            name: &str,
-            value_a: &str,
-            value_b: &str,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_a = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_a), random_span()),
-            };
-
-            let expr_b = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_b), random_span()),
-            };
-
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::EscapedSub,
-                left: Box::new(expr_a),
-                right: Box::new(expr_b),
-            };
-
-            let units = build_resolved_units(units);
-
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
-
-        /// Builds a parameter with a modulo expression.
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `value_a` - The name of the dividend parameter
-        /// * `value_b` - The name of the divisor parameter
-        /// * `units` - An iterator of `UnitSpec` values
-        ///
-        /// # Returns
-        ///
-        /// A parameter with a modulo binary operation: `value_a % value_b`.
-        pub fn build_mod_parameter(
-            name: &str,
-            value_a: &str,
-            value_b: &str,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_a = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_a), random_span()),
-            };
-
-            let expr_b = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(value_b), random_span()),
-            };
-
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::Mod,
-                left: Box::new(expr_a),
-                right: Box::new(expr_b),
-            };
-
-            let units = build_resolved_units(units);
-
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
-
-        /// Builds a parameter with an exponentiation expression.
-        ///
-        /// # Arguments
-        ///
-        /// * `name` - The name of the parameter
-        /// * `base` - The name of the base parameter
-        /// * `exponent` - The exponent value (a literal number)
-        /// * `units` - An iterator of `UnitSpec` values
-        ///
-        /// # Returns
-        ///
-        /// A parameter with an exponentiation binary operation: `base ^ exponent`.
-        pub fn build_exponent_parameter(
-            name: &str,
-            base: &str,
-            exponent: f64,
-            units: impl IntoIterator<Item = UnitSpec>,
-        ) -> ir::Parameter {
-            let expr_base = ir::Expr::Variable {
-                span: random_span(),
-                variable: ir::Variable::parameter(ParameterName::from(base), random_span()),
-            };
-
-            let expr_exponent = ir::Expr::Literal {
-                span: random_span(),
-                value: ir::Literal::Number(exponent),
-            };
-
-            let expr = ir::Expr::BinaryOp {
-                span: random_span(),
-                op: ir::BinaryOp::Pow,
-                left: Box::new(expr_base),
-                right: Box::new(expr_exponent),
-            };
-
-            let units = build_resolved_units(units);
-
-            ir::Parameter::new(
-                ir::Dependencies::new(),
-                ParameterName::from(name),
-                random_span(),
-                random_span(),
-                ParameterLabel::from(name),
-                None,
-                None,
-                ir::ParameterValue::simple(expr, units),
-                ir::Limits::default(),
-                false,
-                ir::TraceLevel::None,
-                None,
-            )
-        }
-
-        /// Loads pre-defined parameters into an existing evaluation context.
-        ///
-        /// The context must already have an active model pushed (e.g. via
-        /// `context.push_active_model(EvalInstanceKey::root(test_model_path("test")))`).
-        ///
-        /// # Arguments
-        ///
-        /// * `context` - The evaluation context to add parameter results to
-        /// * `previous_parameters` - An iterator of tuples containing:
-        ///   - Parameter name
-        ///   - Parameter value (a literal number)
-        ///   - Units as a vector of unit specs
-        pub fn setup_context_with_parameters(
-            context: &mut EvalContext<'_, TestExternalContext>,
-            previous_parameters: impl IntoIterator<Item = (&'static str, f64, Vec<UnitSpec>)>,
-        ) {
-            for (name, value, units) in previous_parameters {
-                let parameter = build_simple_parameter(name, value, units);
-
-                let parameter_value =
-                    eval_parameter(&parameter, context).expect("eval should succeed");
-                let parameter_result = build_parameter_result(name, parameter_value.value);
-                context.add_parameter_result(ParameterName::from(name), Ok(parameter_result));
-            }
-        }
-
-        pub fn build_parameter_result(name: &str, value: Value) -> output::Parameter {
-            output::Parameter {
-                value,
-                ident: ParameterName::from(name),
-                label: ParameterLabel::from(name),
-                print_level: output::PrintLevel::None,
-                debug_info: None,
-                dependencies: output::DependencySet::default(),
-                expr_span: random_span(),
-                warnings: Vec::new(),
-            }
-        }
+        let errors = eval_parameter(&parameter, &mut context).expect_err("eval should fail");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            matches!(&errors[0], EvalError::ParameterUnitMismatch { .. }),
+            "expected ParameterUnitMismatch, got {:?}",
+            errors[0]
+        );
     }
 }
