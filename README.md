@@ -22,13 +22,13 @@ Oneil makes it easier than ever to build, debug, explore, and version-control mo
   * Dependency trees for at-a-glance calculation tracing.
 * Python extensibility.
 * Vim highlighting.
+* Caching and automatic change reports.
+* VSCode highlighting and linting.
 * (coming soon) Automatic documentation:
   * Model derivations.
   * Design test reports.
   * Parametric figures.
 * (coming soon) Side-by-side design comparisons.
-* (future) Caching and automatic change reports.
-* (future) VSCode highlighting and linting.
 
 ## Requirements
 
