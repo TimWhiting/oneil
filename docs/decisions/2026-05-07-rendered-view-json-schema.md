@@ -25,7 +25,8 @@ The top-level shape matches `RenderedTree`: a `root` node plus a `reference_pool
 Beyond `RenderedTree`, each successful push includes:
 
 - `bibliography`: raw `references.bib` text or `null`
-- `workspaceUri`: webview URI for the workspace root (for resolving images in notes), or `null`
+- `workspaceUri`: webview URI for the workspace root (fallback for relative images and PDFs in notes), or `null`
+- `fileBaseUri`: webview URI for the directory of the file being rendered (primary base for relative images and PDFs), or `null`
 - `fileUri`: string URI of the `.one` document being rendered
 
 The renderer uses `fileUri` to tell **file switches** from **same-document refreshes**: only when `fileUri` changes does it clear equation selection and reset panel-open state, so focus-driven reloads do not wipe UI preferences.

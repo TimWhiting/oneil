@@ -1,0 +1,33 @@
+name: vscode-extension
+
+on:
+  push:
+    paths:
+      - "vscode/**"
+      - ".github/workflows/vscode-extension.yml"
+  pull_request:
+    paths:
+      - "vscode/**"
+      - ".github/workflows/vscode-extension.yml"
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test

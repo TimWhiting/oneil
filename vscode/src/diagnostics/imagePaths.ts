@@ -4,7 +4,7 @@
  * Scans every open `.one` / `.on` file for image and PDF references embedded
  * in notes, and reports a warning diagnostic for each path that cannot be
  * found on disk. Resolution follows the same two-step logic used at render
- * time: workspace root first, then the directory of the file itself.
+ * time: model-file directory first, then the workspace root.
  *
  * Note syntax supported:
  *   - Single-line:  `~ <text>`
@@ -48,15 +48,14 @@ function resolveCandidates(src: string, documentUri: vscode.Uri): vscode.Uri[] {
     const normalized = src.replace(/^\.\//, "")
     const candidates: vscode.Uri[] = []
 
-    // Workspace-root-relative
+    // File-directory-relative, then workspace-root-relative.
+    const fileDir = vscode.Uri.joinPath(documentUri, "..")
+    candidates.push(vscode.Uri.joinPath(fileDir, normalized))
+
     const folders = vscode.workspace.workspaceFolders
     if (folders && folders.length > 0) {
         candidates.push(vscode.Uri.joinPath(folders[0].uri, normalized))
     }
-
-    // File-directory-relative
-    const fileDir = vscode.Uri.joinPath(documentUri, "..")
-    candidates.push(vscode.Uri.joinPath(fileDir, normalized))
 
     // Absolute path (starts with `/`)
     if (path.isAbsolute(src)) {
@@ -168,7 +167,7 @@ async function computeDiagnostics(document: vscode.TextDocument): Promise<vscode
             const range = new vscode.Range(start, end)
             const diag = new vscode.Diagnostic(
                 range,
-                `Image/PDF not found: "${ref.src}". Checked relative to workspace root and file directory.`,
+                `Image/PDF not found: "${ref.src}". Checked relative to the model file directory and the workspace root.`,
                 vscode.DiagnosticSeverity.Warning,
             )
             diag.source = "oneil"

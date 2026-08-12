@@ -59,7 +59,7 @@ export type WebviewMessage =
     /**
      * Requests the extension to open a PDF in the dedicated PDF viewer panel,
      * optionally at a specific page.  The extension resolves `cachePath`
-     * against the workspace root and source-file directory; if no local file
+     * against the source-file directory then the workspace root; if no local file
      * is found it falls back to opening `pdfUrl` in the system browser.
      */
     | {

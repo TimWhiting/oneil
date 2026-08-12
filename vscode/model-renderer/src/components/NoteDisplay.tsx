@@ -36,6 +36,7 @@ import {
     workspaceUriAtom,
 } from "../store/atoms"
 import type { ParsedCitation } from "../store/atoms/bibliography"
+import { resolveInlinePdfUrl, resolveRelativeAsset } from "../utils/resolveAssetUrl"
 import { getVsCodeApi } from "../vscode"
 
 // ── Styled wrapper ────────────────────────────────────────────────────────────
@@ -316,42 +317,6 @@ function formatCiteTextual(
     return entry.year ? `${author} (${entry.year})` : author
 }
 
-/**
- * Resolves a relative image `src` to a webview-accessible URI.
- *
- * Resolution order:
- * 1. Absolute / external URLs (`https:`, `data:`) — returned as-is.
- * 2. Paths starting with `/` — prefixed with the workspace root URI.
- * 3. Relative paths (`./` or bare) — first tried against the workspace root
- *    (so `./images/foo.png` works from any model inside the workspace), then
- *    against the directory of the file being rendered as a fallback (useful
- *    when models live outside the workspace root or the image is co-located).
- *
- * Both bases are returned separated by `" "` as an `<img srcset>`-style
- * hint is not applicable here; instead we embed both candidates and let
- * the browser try each — we achieve this by returning the workspace attempt
- * first, and the file-dir attempt is a second `<img>` attribute via onerror.
- * However, since we can only set one `src`, we just pick the most specific:
- * if the path starts with `./` or a bare name, the file-dir base is tried
- * first (more specific), then workspace root.
- */
-function resolveImageSrc(
-    src: string,
-    workspaceUri: string | null,
-    fileBaseUri: string | null,
-): string {
-    if (/^(https?:|data:)/i.test(src)) return src
-    if (src.startsWith("/")) {
-        return workspaceUri ? `${workspaceUri.replace(/\/$/, "")}/${src.replace(/^\//, "")}` : src
-    }
-    // Relative path — prefer workspace root (consistent with how models are
-    // structured), fall back to file directory via onerror on the element.
-    const normalized = src.replace(/^\.\//, "")
-    if (workspaceUri) return `${workspaceUri.replace(/\/$/, "")}/${normalized}`
-    if (fileBaseUri) return `${fileBaseUri.replace(/\/$/, "")}/${normalized}`
-    return src
-}
-
 function renderKatex(src: string, display: boolean): string {
     try {
         return katex.renderToString(src, { output: "mathml", displayMode: display, throwOnError: false })
@@ -623,23 +588,12 @@ function rendererOverrides(
 ): MarkedExtension["renderer"] {
     return {
         image(token: Tokens.Image): string {
-            const src = resolveImageSrc(token.href, workspaceUri, fileBaseUri)
+            const { primary, fallback } = resolveRelativeAsset(token.href, fileBaseUri, workspaceUri)
             const title = token.title ? ` title="${esc(token.title)}"` : ""
-            // When workspace-root resolution is used, add an onerror fallback
-            // that retries with the file-local base URI.
-            let onerror = ""
-            if (
-                fileBaseUri &&
-                workspaceUri &&
-                src.startsWith(workspaceUri) &&
-                !/^(https?:|data:)/i.test(token.href) &&
-                !token.href.startsWith("/")
-            ) {
-                const normalized = token.href.replace(/^\.\//, "")
-                const fallback = `${fileBaseUri.replace(/\/$/, "")}/${normalized}`
-                onerror = ` onerror="if(this.src!=='${esc(fallback)}')this.src='${esc(fallback)}'"`
-            }
-            return `<img src="${esc(src)}" alt="${esc(token.text)}"${title}${onerror}>`
+            const onerror = fallback
+                ? ` onerror="if(this.src!=='${esc(fallback)}')this.src='${esc(fallback)}'"`
+                : ""
+            return `<img src="${esc(primary)}" alt="${esc(token.text)}"${title}${onerror}>`
         },
         link(token: Tokens.Link): string {
             // Render inner tokens via the default pipeline; fall back to text.
@@ -722,8 +676,8 @@ export function NoteDisplay({ text, parameters }: { text: string; parameters?: R
     // Resolution priority:
     //  1. Bare filename in references.bib → construct `pdfCacheUri/<filename>`
     //     and open inline with react-pdf (sets focusedPdfAtom).
-    //  2. Workspace-relative path (starts with ./) → construct from workspaceUri
-    //     and open inline.
+    //  2. Relative path (`./` / `../`) — model directory first, workspace root
+    //     as fallback (same order as note images).
     //  3. Anything else (absolute path, ~, no local path) → fall back to the
     //     extension so it can resolve / download / open externally.
     useEffect(() => {
@@ -741,22 +695,12 @@ export function NoteDisplay({ text, parameters }: { text: string; parameters?: R
             const title = anchor.getAttribute("data-pdf-title") || anchor.getAttribute("title") || ""
             const citationKey = anchor.getAttribute("data-pdf-key") || ""
 
-            // Try to resolve to a webview-accessible URL for inline rendering.
-            let webviewUrl: string | null = null
-            if (cachePath) {
-                const isBare = !cachePath.startsWith("/") && !cachePath.startsWith("~") &&
-                    !cachePath.startsWith("./") && !cachePath.startsWith("../")
-                if (isBare && pdfCacheUri) {
-                    // Bare filename stored in references.bib — look up in cache dir.
-                    webviewUrl = `${pdfCacheUri.replace(/\/$/, "")}/${cachePath}`
-                } else if ((cachePath.startsWith("./") || cachePath.startsWith("../")) && workspaceUri) {
-                    // Workspace-relative path.
-                    webviewUrl = `${workspaceUri.replace(/\/$/, "")}/${cachePath.replace(/^\.\//, "")}`
-                }
-            }
+            const resolved = cachePath
+                ? resolveInlinePdfUrl(cachePath, { pdfCacheUri, fileBaseUri, workspaceUri })
+                : null
 
-            if (webviewUrl) {
-                setFocusedPdf({ url: webviewUrl, page, title })
+            if (resolved) {
+                setFocusedPdf({ url: resolved.primary, fallbackUrl: resolved.fallback ?? undefined, page, title })
             } else {
                 // Fall back to extension: it will resolve absolute / ~ paths,
                 // check the cache directory, offer downloads, and open externally.
@@ -765,8 +709,8 @@ export function NoteDisplay({ text, parameters }: { text: string; parameters?: R
         }
         el.addEventListener("click", handler)
         return () => el.removeEventListener("click", handler)
-    // Re-attach when cache/workspace URIs arrive (they start as null).
-    }, [pdfCacheUri, workspaceUri, setFocusedPdf])
+    // Re-attach when cache/workspace/file URIs arrive (they start as null).
+    }, [pdfCacheUri, fileBaseUri, workspaceUri, setFocusedPdf])
 
     return <NoteWrapper ref={wrapperRef} dangerouslySetInnerHTML={{ __html: html }} />
 }

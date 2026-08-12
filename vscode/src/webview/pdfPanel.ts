@@ -117,7 +117,7 @@ export async function openPdfExternal(
  *
  * Resolution order:
  *   1. Absolute path (after `~` expansion).
- *   2. Relative path (`./…` / `../…`) — workspace root then file directory.
+ *   2. Relative path (`./…` / `../…`) — model-file directory then workspace root.
  *   3. Bare / cache-relative — cache directory first, then workspace root,
  *      then file directory.
  */
@@ -138,10 +138,10 @@ async function resolveLocalPdf(
         candidates.push(vscode.Uri.file(expanded))
     } else if (isRelative) {
         const normalized = expanded.replace(/^\.\//, "")
+        candidates.push(vscode.Uri.joinPath(sourceUri, "..", normalized))
         for (const folder of vscode.workspace.workspaceFolders ?? []) {
             candidates.push(vscode.Uri.joinPath(folder.uri, normalized))
         }
-        candidates.push(vscode.Uri.joinPath(sourceUri, "..", normalized))
     } else {
         // Cache-relative bare filename.
         candidates.push(vscode.Uri.file(path.join(getCacheDirPath(), expanded)))

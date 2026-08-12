@@ -40,14 +40,21 @@ The syntax is:
 Name: identifier = expression
 ```
 
+Optionally insert a **LaTeX render-name** in braces after the colon so the Rendered View (and equation display) uses that symbol instead of deriving one from the identifier:
+
+```oneil
+Name: {LaTeX} identifier = expression
+```
+
 For example,
 
 ```oneil
 Number of batteries: count = 10
+Velocity: {\hat{v}} v = 0
+Surface area: {A_{\mathrm{s}}} A = 4 * pi * R^2
 ```
 
-Here, `Number of batteries` is the label, `count` is the name, and `10` is the
-value.
+Here, `Number of batteries` / `Velocity` / `Surface area` are labels, `count` / `v` / `A` are identifiers, and `{\hat{v}}` / `{A_{\mathrm{s}}}` are optional render-names. If you omit the braces, the viewer still picks a reasonable math symbol from the identifier (e.g. `omega` → $\omega$, `A_hab` → $A_{hab}$). See [Notes](./08-notes.md) for how those symbols appear with notes and `{{…}}` interpolation.
 
 ![A diagram of the parts of a parameter](./images/parameter-diagram.svg)
 

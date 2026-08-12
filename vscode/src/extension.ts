@@ -3,15 +3,32 @@ import { LanguageClient, LanguageClientOptions, ServerOptions } from "vscode-lan
 import { openRenderedView, reloadRenderedView } from "./webview/panel"
 import { registerImagePathDiagnostics } from "./diagnostics/imagePaths"
 import { toggleOfflineMode, isOfflineMode, getCacheDirPath } from "./pdf/cache"
+import {
+    checkForUpdates,
+    installLatestWithProgress,
+    resolveCli,
+    runActivateCliFlow,
+    selectCliVersion,
+    shouldRunBackgroundUpdateCheck,
+} from "./cli"
 
 let client: LanguageClient | undefined
 
 export async function activate(context: vscode.ExtensionContext) {
     registerImagePathDiagnostics(context)
 
+    // Ensure globalStorage exists for managed CLI downloads.
+    await vscode.workspace.fs.createDirectory(context.globalStorageUri)
+
     client?.info("starting language server")
+    const resolved = await runActivateCliFlow(context, restartLanguageServer)
     await restartLanguageServer(context)
     client?.info("language server started")
+
+    const active = resolved ?? (await resolveCli(context))
+    if (shouldRunBackgroundUpdateCheck(context, active)) {
+        void checkForUpdates(context, restartLanguageServer, { silentIfCurrent: true })
+    }
 
     // ── Commands ───────────────────────────────────────────────────────────────
 
@@ -48,6 +65,15 @@ export async function activate(context: vscode.ExtensionContext) {
             await toggleOfflineMode()
             updateStatusBar(statusBar)
         }),
+        vscode.commands.registerCommand("oneil.cli.checkForUpdates", () =>
+            checkForUpdates(context, restartLanguageServer),
+        ),
+        vscode.commands.registerCommand("oneil.cli.installOrUpdate", () =>
+            installLatestWithProgress(context, restartLanguageServer),
+        ),
+        vscode.commands.registerCommand("oneil.cli.selectVersion", () =>
+            selectCliVersion(context, restartLanguageServer),
+        ),
     )
 
     // ── PDF offline-mode status bar item ───────────────────────────────────────
@@ -101,12 +127,18 @@ export function deactivate(): Thenable<void> | undefined {
 }
 
 /**
- * Builds server and client options from the current Oneil configuration.
+ * Builds server and client options from the current Oneil configuration and
+ * resolved CLI path.
  */
-function buildOptions(): { serverOptions: ServerOptions; clientOptions: LanguageClientOptions } {
+async function buildOptions(
+    context: vscode.ExtensionContext,
+): Promise<{ serverOptions: ServerOptions; clientOptions: LanguageClientOptions } | undefined> {
     const config = vscode.workspace.getConfiguration("oneil")
-    const configuredPath = config.get<string | null>("serverPath", null)
-    const command = configuredPath ?? process.env.ONEIL_PATH ?? "oneil"
+    const resolved = await resolveCli(context)
+    if (!resolved) {
+        return undefined
+    }
+    const command = resolved.command
 
     const cacheReadPolicy = config.get<string>("cacheReadPolicy", "always")
     const cacheWritePolicy = config.get<string>("cacheWritePolicy", "always")
@@ -145,16 +177,25 @@ function buildOptions(): { serverOptions: ServerOptions; clientOptions: Language
 }
 
 /**
- * Restarts the Oneil language server. Uses the current configuration (e.g. serverPath).
+ * Restarts the Oneil language server. Uses the current configuration and
+ * resolved CLI (managed install, PATH, or `oneil.serverPath`).
  */
-async function restartLanguageServer(_context: vscode.ExtensionContext): Promise<void> {
+async function restartLanguageServer(context: vscode.ExtensionContext): Promise<void> {
     if (client != null) {
         client.info("restarting language server")
         await client.stop()
         client = undefined
     }
 
-    const { serverOptions, clientOptions } = buildOptions()
+    const options = await buildOptions(context)
+    if (!options) {
+        void vscode.window.showWarningMessage(
+            "Oneil: CLI not found. Use “Oneil: Install or Update CLI” or set `oneil.serverPath`.",
+        )
+        return
+    }
+
+    const { serverOptions, clientOptions } = options
 
     const newClient = new LanguageClient(
         "oneil-language-server",

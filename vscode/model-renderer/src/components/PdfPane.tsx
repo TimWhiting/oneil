@@ -145,6 +145,7 @@ export function PdfPane({ style }: PdfPaneProps) {
     const [loadError, setLoadError] = useState<string | null>(null)
     const [loadProgress, setLoadProgress] = useState<number | null>(null)
     const [workerReady, setWorkerReady] = useState(isPdfWorkerReady)
+    const [activeUrl, setActiveUrl] = useState(focusedPdf?.url ?? "")
 
     // Container ref used for responsive width measurement.
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -161,6 +162,7 @@ export function PdfPane({ style }: PdfPaneProps) {
             setNumPages(null)
             setLoadError(null)
             setLoadProgress(null)
+            setActiveUrl(focusedPdf.url)
         }
     }, [focusedPdf])
 
@@ -201,9 +203,15 @@ export function PdfPane({ style }: PdfPaneProps) {
     }, [])
 
     const handleLoadError = useCallback((err: Error) => {
+        if (focusedPdf?.fallbackUrl && activeUrl !== focusedPdf.fallbackUrl) {
+            setActiveUrl(focusedPdf.fallbackUrl)
+            setLoadError(null)
+            setLoadProgress(null)
+            return
+        }
         setLoadError(err.message)
         setLoadProgress(null)
-    }, [])
+    }, [focusedPdf, activeUrl])
 
     const close = useCallback(() => setFocusedPdf(null), [setFocusedPdf])
     const prev = useCallback(() => setCurrentPage(p => Math.max(1, p - 1)), [])
@@ -230,7 +238,7 @@ export function PdfPane({ style }: PdfPaneProps) {
                     <StatusMsg>Failed to load PDF: {loadError}</StatusMsg>
                 ) : (
                     <Document
-                        file={focusedPdf.url}
+                        file={activeUrl}
                         options={{ worker: getPdfWorker() ?? undefined }}
                         onLoadSuccess={handleLoadSuccess}
                         onLoadError={handleLoadError}

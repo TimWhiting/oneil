@@ -119,7 +119,8 @@ cargo run -p oneil -- path/to/model.on
 
 ## Editor and tooling (optional)
 
-- **VS Code / Cursor**: Install the [Oneil extension](https://marketplace.visualstudio.com/items?itemName=careweather.oneil) from the Marketplace for LSP and syntax highlighting.
+
+- **VS Code / Cursor**: Install the [Oneil extension](https://marketplace.visualstudio.com/items?itemName=careweather.oneil) from the Marketplace for LSP and syntax highlighting. The extension can download the Oneil CLI from [GitHub Releases](https://github.com/careweather/oneil/releases) (Command Palette: “Oneil: Install or Update CLI”, or “Oneil: Select CLI Version…” to install a different published tag). Set `oneil.serverPath` only when you want to force a local build; that setting disables managed updates.
 
 - **Vim**: See the [Vim support](https://github.com/careweather/oneil#vim-support) section in the main README for syntax highlighting.
 

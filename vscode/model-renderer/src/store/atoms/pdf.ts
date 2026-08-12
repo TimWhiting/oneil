@@ -20,6 +20,11 @@ export interface FocusedPdf {
     page: number
     /** Human-readable title shown in the panel header. */
     title: string
+    /**
+     * Alternate webview URL when `url` fails to load (workspace root after
+     * the model-file directory).
+     */
+    fallbackUrl?: string
 }
 
 /**

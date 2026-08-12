@@ -11,6 +11,7 @@ import styled from "styled-components"
 import {
     citationGroupsAtom,
     focusedParamKeyAtom,
+    fileBaseUriAtom,
     focusedPdfAtom,
     parsedBibliographyAtom,
     pdfCacheUriAtom,
@@ -19,6 +20,7 @@ import {
     type CitationUsageLocation,
     type ParsedCitation,
 } from "../store/atoms"
+import { resolveInlinePdfUrl } from "../utils/resolveAssetUrl"
 import { getVsCodeApi } from "../vscode"
 
 // ── Styled components ─────────────────────────────────────────────────────────
@@ -182,6 +184,7 @@ export function BibliographyPanel() {
     const setFocusedParam = useSetAtom(focusedParamKeyAtom)
     const setFocusedPdf = useSetAtom(focusedPdfAtom)
     const pdfCacheUri = useAtomValue(pdfCacheUriAtom)
+    const fileBaseUri = useAtomValue(fileBaseUriAtom)
     const workspaceUri = useAtomValue(workspaceUriAtom)
 
     const handleUsageClick = useCallback(
@@ -199,19 +202,12 @@ export function BibliographyPanel() {
             const page = pdfPage ?? 1
             const pdfUrl = url ?? (doi ? `https://doi.org/${doi}` : null)
 
-            let webviewUrl: string | null = null
-            if (pdfCachePath) {
-                const isBare = !pdfCachePath.startsWith("/") && !pdfCachePath.startsWith("~") &&
-                    !pdfCachePath.startsWith("./") && !pdfCachePath.startsWith("../")
-                if (isBare && pdfCacheUri) {
-                    webviewUrl = `${pdfCacheUri.replace(/\/$/, "")}/${pdfCachePath}`
-                } else if ((pdfCachePath.startsWith("./") || pdfCachePath.startsWith("../")) && workspaceUri) {
-                    webviewUrl = `${workspaceUri.replace(/\/$/, "")}/${pdfCachePath.replace(/^\.\//, "")}`
-                }
-            }
+            const resolved = pdfCachePath
+                ? resolveInlinePdfUrl(pdfCachePath, { pdfCacheUri, fileBaseUri, workspaceUri })
+                : null
 
-            if (webviewUrl) {
-                setFocusedPdf({ url: webviewUrl, page, title: title || key })
+            if (resolved) {
+                setFocusedPdf({ url: resolved.primary, fallbackUrl: resolved.fallback ?? undefined, page, title: title || key })
             } else {
                 getVsCodeApi().postMessage({
                     type: "openPdf",
@@ -223,7 +219,7 @@ export function BibliographyPanel() {
                 })
             }
         },
-        [pdfCacheUri, workspaceUri, setFocusedPdf],
+        [pdfCacheUri, fileBaseUri, workspaceUri, setFocusedPdf],
     )
 
     if (groups.length === 0) return null

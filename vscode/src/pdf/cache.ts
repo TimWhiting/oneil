@@ -16,8 +16,15 @@
 import * as vscode from "vscode"
 import * as os from "os"
 import * as path from "path"
-import * as crypto from "crypto"
 import { findPrimaryBibUri } from "../bibliography/locate"
+import {
+    cacheFilename,
+    fetchPdfBytes,
+    portableCachePathFrom,
+    updateBibText,
+} from "./cacheLogic"
+
+export { cacheFilename } from "./cacheLogic"
 
 /**
  * Returns a portable path to store in `references.bib` for a cached PDF.
@@ -28,11 +35,7 @@ import { findPrimaryBibUri } from "../bibliography/locate"
  * as-is so it can still be resolved directly.
  */
 export function portableCachePath(absPath: string): string {
-    const cacheDir = getCacheDirPath()
-    if (absPath.startsWith(cacheDir + path.sep) || absPath.startsWith(cacheDir + "/")) {
-        return path.basename(absPath)
-    }
-    return absPath
+    return portableCachePathFrom(absPath, getCacheDirPath())
 }
 
 // ── Settings helpers ──────────────────────────────────────────────────────────
@@ -58,27 +61,6 @@ export function isAutoDownload(): boolean {
 export async function toggleOfflineMode(): Promise<void> {
     const config = vscode.workspace.getConfiguration("oneil.pdf")
     await config.update("offlineOnly", !isOfflineMode(), vscode.ConfigurationTarget.Global)
-}
-
-// ── Filename derivation ───────────────────────────────────────────────────────
-
-/**
- * Returns a safe, deterministic filename for a cached PDF.
- *
- * Format: `<sanitized-title>_<md5-of-url[0..7]>.pdf`
- *
- * The URL hash makes the filename unique per source even when two citations
- * share the same title.  The human-readable prefix makes the cache directory
- * easy to browse.
- */
-export function cacheFilename(url: string, title: string): string {
-    const hash = crypto.createHash("md5").update(url).digest("hex").slice(0, 8)
-    const safe = (title || "pdf")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 48)
-    return `${safe}_${hash}.pdf`
 }
 
 /** Returns the `vscode.Uri` of the expected cache file for a given URL. */
@@ -123,35 +105,16 @@ export async function downloadAndCache(url: string, title: string): Promise<vsco
         async (progress) => {
             progress.report({ message: "Connecting…" })
 
-            // Ensure the cache directory exists.
             const dirUri = vscode.Uri.file(getCacheDirPath())
             await vscode.workspace.fs.createDirectory(dirUri)
 
-            // Fetch with redirect following (fetch() follows by default).
-            let response: Response
-            try {
-                response = await fetch(url, { redirect: "follow" })
-            } catch (err) {
-                throw new Error(`Network error fetching PDF: ${err instanceof Error ? err.message : String(err)}`)
-            }
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status} ${response.statusText} — ${url}`)
-            }
+            const bytes = await fetchPdfBytes(url)
 
             progress.report({ message: "Saving to cache…" })
 
-            let buffer: ArrayBuffer
             try {
-                buffer = await response.arrayBuffer()
+                await vscode.workspace.fs.writeFile(destUri, bytes)
             } catch (err) {
-                throw new Error(`Failed to read response body: ${err instanceof Error ? err.message : String(err)}`)
-            }
-
-            try {
-                await vscode.workspace.fs.writeFile(destUri, new Uint8Array(buffer))
-            } catch (err) {
-                // Best-effort cleanup of any partial file.
                 try { await vscode.workspace.fs.delete(destUri) } catch { /* ignore */ }
                 throw new Error(`Failed to write cache file: ${err instanceof Error ? err.message : String(err)}`)
             }
@@ -237,9 +200,6 @@ export async function offerBibUpdate(
 
 /**
  * Inserts or replaces the `file` field for a given citation key in the bib file.
- *
- * Uses a brace-depth counter to locate the entry boundaries robustly, then
- * splices in `  file = {:<path>:PDF},` immediately before the closing `}`.
  */
 async function updateBibFile(
     bibUri: vscode.Uri,
@@ -248,54 +208,6 @@ async function updateBibFile(
 ): Promise<void> {
     const bytes = await vscode.workspace.fs.readFile(bibUri)
     const text = Buffer.from(bytes).toString("utf-8")
-
-    // Find the entry start.
-    const entryRe = new RegExp(`@\\w+\\{\\s*${escapeRegex(key)}\\s*,`, "i")
-    const startMatch = entryRe.exec(text)
-    if (!startMatch) {
-        throw new Error(`Entry @${key} not found in ${bibUri.fsPath}`)
-    }
-
-    // Walk forward from the entry start tracking brace depth to find the
-    // closing `}` of the entry.
-    let depth = 0
-    let entryEnd = -1
-    for (let i = startMatch.index; i < text.length; i++) {
-        if (text[i] === "{") depth++
-        else if (text[i] === "}") {
-            depth--
-            if (depth === 0) {
-                entryEnd = i
-                break
-            }
-        }
-    }
-    if (entryEnd === -1) {
-        throw new Error(`Could not find closing brace for @${key}`)
-    }
-
-    const fileValue = `:${filePath}:PDF`
-    const fieldLine = `  file = {${fileValue}},\n`
-
-    // If a `file` field already exists inside the entry, replace it.
-    const entryBody = text.slice(startMatch.index, entryEnd)
-    const existingField = /^[ \t]*file\s*=\s*\{[^}]*\}/im.exec(entryBody)
-    let updated: string
-    if (existingField) {
-        const absStart = startMatch.index + existingField.index
-        const absEnd = absStart + existingField[0].length
-        updated =
-            text.slice(0, absStart) +
-            `file = {${fileValue}}` +
-            text.slice(absEnd)
-    } else {
-        // Insert before the closing brace of the entry.
-        updated = text.slice(0, entryEnd) + fieldLine + text.slice(entryEnd)
-    }
-
+    const updated = updateBibText(text, key, filePath, bibUri.fsPath)
     await vscode.workspace.fs.writeFile(bibUri, Buffer.from(updated, "utf-8"))
-}
-
-function escapeRegex(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

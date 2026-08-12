@@ -8,6 +8,9 @@
 
 ## Unreleased
 
+- Extension-managed CLI: download / update / select GitHub release versions for the language server
+- Resolve note images and relative citation PDFs from the model file’s directory first, then the workspace root (same order as `references.bib`)
+
 ## v1.0.0 - 2026-08-12
 
 - Align extension version with Oneil 1.0.0 (Rust implementation on `main`)

@@ -149,6 +149,21 @@ function extractRawBibFields(
     return result
 }
 
+/**
+ * Returns a bare DOI identifier, or `undefined` when `raw` is empty.
+ *
+ * Strips common wrappers so `https://doi.org/10.x/y`, `doi:10.x/y`, and
+ * `10.x/y` all become `10.x/y` before the viewer prefixes `https://doi.org/`.
+ */
+export function normalizeDoi(raw: string | undefined): string | undefined {
+    if (!raw) return undefined
+    const stripped = raw
+        .trim()
+        .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
+        .replace(/^doi:\s*/i, "")
+    return stripped || undefined
+}
+
 /** Parses raw BibTeX text into a lookup map keyed by citation key. */
 function parseBibTeXWithCite(
     raw: string,
@@ -170,7 +185,7 @@ function parseBibTeXWithCite(
         const authorDisplayFull = formatAuthorsAll(entry["author"] as CslAuthor[] | undefined)
         const title = (entry["title"] as string | undefined) ?? ""
         const url = (entry["URL"] as string | undefined) || undefined
-        const doi = (entry["DOI"] as string | undefined) || undefined
+        const doi = normalizeDoi(entry["DOI"] as string | undefined)
 
         // Use our regex extractor for fields citation-js drops.
         const extra = rawFields.get(key)
