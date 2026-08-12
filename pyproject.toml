@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "oneil"
-version = "0.16.1"
+version = "1.0.0"
 authors = [
 	{ name = "Patrick Walton", email = "m.patrick.walton@gmail.com" },
 	{ name = "Brendon Bown", email = "brendon.bown@proton.me" },
@@ -13,7 +13,7 @@ description = "Design specification language for system modeling"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
-	"Development Status :: 3 - Alpha",
+	"Development Status :: 5 - Production/Stable",
 	"Programming Language :: Rust",
 	"Topic :: Scientific/Engineering",
 	"Environment :: Console",

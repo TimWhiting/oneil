@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-12
+
+1.0.0 makes the Rust implementation of Oneil the primary line of development on
+`main`, replacing the Python implementation previously published as 0.15.x.
+Pre-release Rust builds were already available as 0.16.x; this release
+promotes that rewrite to the stable 1.x series. See the README for install
+instructions and for model migration notes if you are upgrading from Python
+Oneil.
+
 ### Added
 
 - **ci**: Added `actions/model-test-report`, a TypeScript GitHub Action for
@@ -24,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Oneil on `main` is now the Rust implementation (CLI, Python
+  bindings via maturin/PyO3, LSP, and VS Code extension). The previous pure-
+  Python codebase is no longer shipped from this branch.
 - **cli**: `oneil test` now exits with status 1 if there were any error
   diagnostics or any test failed
 
@@ -77,5 +89,7 @@ also some changes to the syntax and semantics.
 - **Breaking:** Parameters that use a "pointer" (`=>`) are now obsolete and can
   be replaced with regular parameters.
 
-[Unreleased]: https://github.com/careweather/oneil/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/careweather/oneil/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/careweather/oneil/compare/v0.16.1...v1.0.0
+[0.16.1]: https://github.com/careweather/oneil/releases/tag/v0.16.1
 [0.16.0]: https://github.com/careweather/oneil/releases/tag/v0.16.0

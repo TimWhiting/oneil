@@ -29,7 +29,7 @@
 
       packages.default = pkgs.rustPlatform.buildRustPackage {
         pname = "oneil";
-        version = "0.16.1";
+        version = "1.0.0";
         src = ./.;
         nativeBuildInputs = [ pkgs.python3 ]; # used by PyO3
         cargoLock.lockFile = ./Cargo.lock;
