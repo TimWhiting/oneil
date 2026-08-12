@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+- Extension-managed CLI: download / update / select GitHub release versions for the language server
+
 ## v1.0.0 - 2026-08-12
 
 - Align extension version with Oneil 1.0.0 (Rust implementation on `main`)

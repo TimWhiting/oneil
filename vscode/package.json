@@ -43,6 +43,18 @@
         "command": "oneil.pdf.toggleOfflineMode",
         "title": "Oneil: Toggle PDF Offline Mode",
         "icon": "$(cloud)"
+      },
+      {
+        "command": "oneil.cli.checkForUpdates",
+        "title": "Oneil: Check for CLI Updates"
+      },
+      {
+        "command": "oneil.cli.installOrUpdate",
+        "title": "Oneil: Install or Update CLI"
+      },
+      {
+        "command": "oneil.cli.selectVersion",
+        "title": "Oneil: Select CLI Version…"
       }
     ],
     "menus": {
@@ -70,7 +82,12 @@
         "oneil.serverPath": {
           "type": "string",
           "default": null,
-          "description": "Path to the Oneil language server executable. Use this when the server is not on PATH. Leave empty to use ONEIL_PATH env var or \"oneil\"."
+          "description": "Path to the Oneil language server executable. When set, this always wins over the extension-managed CLI, ONEIL_PATH, and PATH. Leave empty to use a managed install, ONEIL_PATH, or \"oneil\" on PATH."
+        },
+        "oneil.cli.autoCheckUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically check GitHub Releases for Oneil CLI updates (at most once per day). Disabled while oneil.serverPath is set. Use “Skip this version” on the update prompt to suppress a particular release."
         },
         "oneil.cacheReadPolicy": {
           "type": "string",
@@ -173,10 +190,12 @@
     "test": "vscode-test"
   },
   "dependencies": {
+    "semver": "^7.8.5",
     "vscode-languageclient": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "20.x",
+    "@types/semver": "^7.8.0",
     "@types/vscode": "^1.0.0",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
