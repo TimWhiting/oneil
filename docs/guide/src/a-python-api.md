@@ -1,10 +1,15 @@
-# Appendix A: Python API (oneil)
+# Appendix A: Python library (`import oneil`)
 
-The Oneil Rust implementation exposes a Python library built from `oneil_python::py_compat`. It provides Oneil’s builtin values, units, and functions, plus Python classes for **Interval**, **MeasuredNumber**, and **Unit**, so you can use Oneil’s number and unit semantics from Python.
+The `python-lib` Cargo feature builds Oneil’s Python extension module (`oneil_python::py_compat`). It exposes builtin values, units, and functions, plus Python classes for **Interval**, **MeasuredNumber**, and **Unit**.
+
+The Rust CLI enables `python-lib` by default. When a model [`import`](./11-importing-python.md)s a `.py` file, the CLI injects this same module into the embedded interpreter, so helpers can `import oneil` without a pip package.
+
+You can also install the module for a standalone Python process (`pip install` / maturin) when you want those types outside the CLI. Oneil’s primary interface is still the **Rust CLI** — see [Installation](./02-installation.md).
 
 ## Installation
 
-The Python package is built with [maturin](https://www.maturin.rs/) and the `python-lib` feature. From the repository root:
+The Python package is built with [maturin](https://www.maturin.rs/) and the
+`python-lib` feature. From the repository root:
 
 ```sh
 pip install -e .
@@ -16,6 +21,8 @@ Or build a wheel:
 maturin build --release -f
 pip install target/wheels/oneil-*.whl
 ```
+
+Version tags may also attach pre-built wheels on the [GitHub Releases](https://github.com/careweather/oneil/releases) page.
 
 Requires **Python 3.10+**.
 

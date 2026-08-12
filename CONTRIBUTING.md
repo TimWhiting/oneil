@@ -81,7 +81,7 @@ settings](https://users.rust-lang.org/t/how-to-use-clippy-in-vs-code-with-rust-a
 
 ## System Architecture
 
-The architecture of the system is described in [`docs/architecture/README.md`](docs/architecture/README.md). The code itself is found in [`src-rs/`](src-rs/).
+The architecture of the system is described in [`docs/architecture/README.md`](docs/architecture/README.md). The code itself is found in [`src/`](src/).
 
 ## Coding Standards
 
@@ -144,7 +144,7 @@ pull requests:
 ### Coding standards review (advisory)
 
 [`.github/workflows/coding-standards-review.yml`](.github/workflows/coding-standards-review.yml)
-runs when a PR changes files under `src-rs/`. It installs the
+runs when a PR changes files under `src/`. It installs the
 [Cursor CLI](https://cursor.com/docs/cli) and runs it as a one-shot agent
 (`cursor-agent -p --output-format json`) that reviews the diff against
 [`docs/CODING_STANDARDS.md`](docs/CODING_STANDARDS.md) using the instructions
@@ -166,7 +166,7 @@ checkout, etc.), while still allowing read-only ones (`git diff`, `git show`,
 
 [`.github/workflows/weekly-quality-review.yml`](.github/workflows/weekly-quality-review.yml)
 runs on a weekly schedule (Mondays) and via manual `workflow_dispatch`. It
-picks a random crate under `src-rs/` and a random review focus
+picks a random crate under `src/` and a random review focus
 (implementation, architecture, or testing), then uses the Cursor CLI to:
 
 1. Review the crate and write the findings to a markdown file.

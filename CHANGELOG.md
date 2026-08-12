@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
 ## [1.0.0] - 2026-08-12
 
 1.0.0 makes the Rust implementation of Oneil the primary line of development on
@@ -18,10 +20,16 @@ Oneil.
 
 ### Added
 
-- **ci**: Added `actions/model-test-report`, a TypeScript GitHub Action for
-  downstream model repos: installs a pinned `oneil` ref, runs `oneil test
-  --format json`, and — when given both a head and base checkout — reports
-  regressions and fixes rather than just a pass/fail count. See
+- **ci**: Release workflow publishes Rust CLI binaries for Linux, Windows, and
+  macOS when a `v*` tag is pushed, plus wheels for the Python library
+  (`import oneil`). Release notes are taken from `CHANGELOG.md`.
+- **docs**: Installation guide documents downloading pre-built release binaries.
+- **ci**: Added `actions/install-oneil`, a composite GitHub Action that installs
+  a released Oneil CLI binary onto `PATH`.
+- **ci**: Added `actions/model-test-report`, a GitHub Action for downstream
+  model repos: installs a released CLI via `install-oneil`, runs
+  `oneil test --format json`, and — when given both a head and base checkout —
+  reports regressions and fixes rather than just a pass/fail count. See
   `actions/model-test-report/README.md`.
 - **ci**: TypeScript bindings for JSON wire formats (`TestReport`,
   `RenderedTree`, shared leaves) are generated with `ts-rs` into
@@ -30,12 +38,16 @@ Oneil.
 - **cli**: `oneil test --format json` prints a machine-readable JSON report
   (diagnostics plus per-test pass/fail results, with dependency values for
   failures).
+- **docs**: User guide Appendix C shows how to run Oneil model tests in CI,
+  leading with `model-test-report` and covering `install-oneil`.
 
 ### Changed
 
-- **Breaking:** Oneil on `main` is now the Rust implementation (CLI, Python
-  bindings via maturin/PyO3, LSP, and VS Code extension). The previous pure-
-  Python codebase is no longer shipped from this branch.
+- **Breaking:** Oneil on `main` is now the Rust implementation (CLI, LSP, and
+  VS Code extension). The previous pure-Python codebase is no longer shipped
+  from this branch. Models may still `import` ordinary `.py` files and call
+  those functions. The **Python library** (`import oneil` / py_compat) is
+  included in the CLI and available as release wheels.
 - **cli**: `oneil test` now exits with status 1 if there were any error
   diagnostics or any test failed
 

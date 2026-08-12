@@ -283,7 +283,7 @@ Anyone composing with the affected unit re-composes on next `eval_model` /
 
 ## Implementation
 
-`src-rs/oneil_frontend/src/instance/graph.rs` implements the full architecture
+`src/oneil_frontend/src/instance/graph.rs` implements the full architecture
 described above. Key pieces:
 
 - **Entry points.** `build_unit_graph(unit, &mut UnitGraphCache, &mut stack, …)`

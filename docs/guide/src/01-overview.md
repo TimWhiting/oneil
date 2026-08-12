@@ -250,8 +250,7 @@ used to provide a fallback value.
 Boiling point of water: bp_water = flaky_simulation() ? 373.15 :K
 ```
 
-Check out [Oneil's Python API](./a-python-api.md) for more details on how to use
-Oneil with Python.
+Check out [Oneil's Python API](./a-python-api.md) for more details on how to use Oneil with Python.
 
 ## Model imports
 

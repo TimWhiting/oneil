@@ -12,5 +12,6 @@
 - [Designs](./10-designs.md)
 - [Importing Python Functions](./11-importing-python.md)
 
-[Appendix A: Python API](./a-python-api.md)
+[Appendix A: Python library (`import oneil`)](./a-python-api.md)
 [Appendix B: Using AI](./b-using-ai.md)
+[Appendix C: Continuous Integration](./c-ci-setup.md)

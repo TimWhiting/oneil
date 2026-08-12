@@ -4,19 +4,21 @@ on:
   push:
     paths:
       - "actions/model-test-report/**"
+      - "actions/install-oneil/**"
       - "packages/ts-interfaces/**"
       - ".github/workflows/model-test-report-action.yml"
       - "scripts/**"
-      - "src-rs/**"
+      - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
   pull_request:
     paths:
       - "actions/model-test-report/**"
+      - "actions/install-oneil/**"
       - "packages/ts-interfaces/**"
       - ".github/workflows/model-test-report-action.yml"
       - "scripts/**"
-      - "src-rs/**"
+      - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
 

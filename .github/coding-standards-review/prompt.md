@@ -4,7 +4,7 @@ You are reviewing a pull request for compliance with this repository's coding st
 
 1. Read `docs/CODING_STANDARDS.md` thoroughly (use the Read tool).
 2. The user message that follows gives you the base SHA, head SHA, diff range,
-   and the list of changed files under `src-rs/` to review. Review **only**
+   and the list of changed files under `src/` to review. Review **only**
    those files. Do not review unchanged code except when needed for context.
 3. Compute the diff yourself in the workspace (cwd is the repo root), for example:
    `git diff --unified=3 <range>` (the range is given as `<base>...<head>`).

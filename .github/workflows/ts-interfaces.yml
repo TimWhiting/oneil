@@ -7,7 +7,7 @@ on:
       - ".github/workflows/ts-interfaces.yml"
       - "scripts/generate-ts-interfaces.sh"
       - "scripts/check-ts-interfaces.sh"
-      - "src-rs/**"
+      - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
   pull_request:
@@ -16,7 +16,7 @@ on:
       - ".github/workflows/ts-interfaces.yml"
       - "scripts/generate-ts-interfaces.sh"
       - "scripts/check-ts-interfaces.sh"
-      - "src-rs/**"
+      - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
 

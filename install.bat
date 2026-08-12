@@ -3,13 +3,23 @@ setlocal EnableExtensions
 
 rem Directory containing this script (trailing backslash)
 set "SCRIPT_DIR=%~dp0"
-set "NO_PYTHON=0"
+set "WITH_PYTHON_COMPILER=0"
 set "EDITABLE=0"
 
 :arg_loop
 if "%~1"=="" goto arg_done
+if /i "%~1"=="--with-python-compiler" (
+  set "WITH_PYTHON_COMPILER=1"
+  shift
+  goto arg_loop
+)
+if /i "%~1"=="--with-python-package" (
+  set "WITH_PYTHON_COMPILER=1"
+  shift
+  goto arg_loop
+)
 if /i "%~1"=="--no-python" (
-  set "NO_PYTHON=1"
+  echo Note: --no-python skips the pip Python library; the CLI still includes python-lib. 1>&2
   shift
   goto arg_loop
 )
@@ -34,8 +44,8 @@ call :usage
 exit /b 0
 
 :arg_done
-if "%NO_PYTHON%"=="1" if "%EDITABLE%"=="1" (
-  echo Note: --editable has no effect with --no-python. 1>&2
+if "%EDITABLE%"=="1" if not "%WITH_PYTHON_COMPILER%"=="1" (
+  echo Note: --editable only applies with --with-python-package. 1>&2
 )
 
 where cargo >nul 2>&1
@@ -54,16 +64,9 @@ if errorlevel 1 (
 call :require_c_toolchain
 if errorlevel 1 exit /b 1
 
-set "ONEIL_PKG=%SCRIPT_DIR%src-rs\oneil"
+set "ONEIL_PKG=%SCRIPT_DIR%src\oneil"
 if not exist "%ONEIL_PKG%\Cargo.toml" (
   echo Error: expected Cargo.toml at "%ONEIL_PKG%" 1>&2
-  exit /b 1
-)
-
-if "%NO_PYTHON%"=="1" goto do_cargo_install
-
-if not exist "%SCRIPT_DIR%pyproject.toml" (
-  echo Error: pyproject.toml not found at "%SCRIPT_DIR%" 1>&2
   exit /b 1
 )
 
@@ -75,9 +78,9 @@ if not defined PYTHON_CMD (
   if not errorlevel 1 set "PYTHON_CMD=python"
 )
 if not defined PYTHON_CMD (
-  echo Error: Python 3.10+ is required for the library install but no python3/python was found. 1>&2
+  echo Error: Python 3.10+ was not found ^(needed to link the Rust CLI's model Python support^). 1>&2
   echo. 1>&2
-  echo Install Python, or re-run with --no-python to install only the CLI with no Python bindings. 1>&2
+  echo Install Python and development headers, then re-run this script. 1>&2
   exit /b 1
 )
 
@@ -91,25 +94,25 @@ if errorlevel 1 (
 if errorlevel 1 (
   echo Error: Python development headers were not found ^(Python.h is missing^). 1>&2
   echo. 1>&2
-  echo The CLI build links against Python; install headers before building. 1>&2
+  echo The Rust CLI links against Python so models can import .py files. 1>&2
   echo. 1>&2
   echo On Windows, use the python.org installer and enable optional features, or install matching 1>&2
   echo debug/header packages for your Python distribution, then re-run this script. 1>&2
   exit /b 1
 )
 
-:do_cargo_install
-echo Installing Oneil CLI with Cargo...
-if "%NO_PYTHON%"=="1" (
-  cargo install --force --path "%ONEIL_PKG%" --no-default-features --features rust-lib
-) else (
-  cargo install --force --path "%ONEIL_PKG%"
+if "%WITH_PYTHON_COMPILER%"=="1" if not exist "%SCRIPT_DIR%pyproject.toml" (
+  echo Error: pyproject.toml not found at "%SCRIPT_DIR%" 1>&2
+  exit /b 1
 )
+
+echo Installing Rust Oneil CLI ^(default features: rust-lib + python-lib^)...
+cargo install --force --path "%ONEIL_PKG%"
 if errorlevel 1 exit /b 1
 
-if "%NO_PYTHON%"=="1" goto finish
+if not "%WITH_PYTHON_COMPILER%"=="1" goto finish
 
-echo Installing Oneil Python package...
+echo Installing Python library ^(import oneil^)...
 pushd "%SCRIPT_DIR%"
 if "%EDITABLE%"=="1" (
   %PYTHON_CMD% -m pip install -e .
@@ -146,17 +149,18 @@ exit /b 1
 :usage
 echo Usage: install.bat [options]
 echo.
-echo   Builds and installs the Oneil CLI with Cargo. By default, also installs the
-echo   Python package ^(import oneil^) for the current interpreter.
+echo   Builds and installs the Rust Oneil CLI with Cargo ^(rust-lib + python-lib^).
+echo   That build links PyO3 so models can import ordinary .py files and helper
+echo   modules can import oneil.
 echo.
 echo Options:
-echo   --no-python    Install the CLI only: no Python bindings and no pip package.
-echo   -e, --editable Install the Python package in editable mode ^(development^).
-echo   -h, --help     Show this help.
+echo   --with-python-package   Also install the Python library via pip.
+echo   -e, --editable          With --with-python-package, install it editable.
+echo   -h, --help              Show this help.
 echo.
 echo Prerequisites:
 echo   - Cargo ^(Rust^): https://rustup.rs/
 echo   - gcc ^(or MSVC with the windows-msvc Rust target; see error text if checks fail^)
-echo   - For the default install: Python 3.10+ with pip ^(python3 -m pip / python -m pip^)
-echo     and Python development headers ^(Python.h^)
+echo   - Python 3.10+ development headers ^(CLI links libpython for model imports^)
+echo   - For --with-python-package: Python 3.10+ with pip
 goto :eof

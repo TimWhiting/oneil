@@ -1,10 +1,8 @@
 # Importing Python Functions
 
-For functions not supported by the above equation formats, you can define a
-python function and link it.
+Oneil can call functions defined in ordinary `.py` files. Helper modules may `import oneil` for `Interval`, `MeasuredNumber`, units, and builtins — the CLI injects that module (see [Appendix A](./a-python-api.md)).
 
-Functions are stored in a separate python file, which must be imported in the
-Oneil file.
+For calculations or simulations that need Python, after you implement the function in python simply import the Python file into Oneil:
 
 ```oneil
 import <name of functions file>

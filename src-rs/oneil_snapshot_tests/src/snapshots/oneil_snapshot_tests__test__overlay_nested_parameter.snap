@@ -1,8 +1,0 @@
----
-source: src-rs/oneil_snapshot_tests/src/test.rs
-expression: "run_fixture(\"design_overlay/nested_param/nested_param_design.one\")"
----
-Model: fixtures/design_overlay/nested_param/nested_param_parent.on
-Tests: 0/0
-Parameters:
-  total = 1e3 :N

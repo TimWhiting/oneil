@@ -1,6 +1,0 @@
----
-source: src-rs/oneil_snapshot_tests/src/test.rs
-expression: "run_fixture_with_design(\"overlay_target_missing/parent.on\",\n\"overlay_target_missing/typo.one\",)"
----
-error: design overlay targets parameter `lenght`, which is not defined on the target model (did you mean `length`?)
-  at fixtures/overlay_target_missing/typo.one:9:1

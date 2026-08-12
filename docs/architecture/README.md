@@ -1,6 +1,6 @@
 # Oneil Architecture
 
-The Rust code lives under `src-rs/` as a single workspace. The **frontend** is what you use directly—the command-line app and editor support. The **backend** is what parses, resolves, and runs Oneil. The **`oneil_runtime`** crate ties the backend together: it loads files, keeps results in memory, and is what the CLI and language server call into.
+The Rust code lives under `src/` as a single workspace. The **frontend** is what you use directly—the command-line app and editor support. The **backend** is what parses, resolves, and runs Oneil. The **`oneil_runtime`** crate ties the backend together: it loads files, keeps results in memory, and is what the CLI and language server call into.
 
 **Data flow (simplified):** source text is parsed into an AST (**`oneil_ast`** / **`oneil_parser`**), per-file IR is produced and then composed into an `InstanceGraph` (**`oneil_ir`** / **`oneil_frontend`**), the composed graph is validated (**`oneil_analysis`**), and expressions are evaluated to values (**`oneil_eval`** / **`oneil_output`**). Standard units, prefixes, and builtins come from **`oneil_builtins`**. Optional Python interop is implemented in **`oneil_python`**. Cross-cutting types and helpers live in **`oneil_shared`**.
 
@@ -99,7 +99,7 @@ flowchart TD
 | **`oneil_frontend`** | Resolves per-file IR from the AST and runs the per-unit build pass that produces a cached `InstanceGraph` per compilation unit. Composition (cloning a cached root graph and overlaying runtime designs) also lives here. See `oneil_frontend/README.md` for crate-internal layout. |
 | **`oneil_eval`** | Evaluates IR to values: the core interpreter for expressions and the dynamic semantics. Takes resolved IR and `oneil_output` types; does not parse or resolve by itself. |
 | **`oneil_builtins`** | Supplies the standard environment: builtin functions, physical units, SI prefixes, and related values. Built on the evaluator and value types; the runtime installs this as the default builtins. |
-| **`oneil_python`** | Bridges Oneil and Python when enabled: embedding Python values and calling into Python from evaluated Oneil code. Used from the runtime path that supports Python interop, not from the parser alone. |
+| **`oneil_python`** | Bridges Oneil and Python: embedding Python values and calling into Python from evaluated Oneil code. Used from the runtime path that supports Python interop, not from the parser alone. |
 | **`oneil_analysis`** | Semantic analysis and static checks over IR—extra diagnostics beyond “does it parse and resolve,” such as consistency rules the language cares about before or alongside execution. |
 | **`oneil_runtime`** | The `Runtime` type and glue: caches for sources, ASTs, and per-unit `InstanceGraph`s (`UnitGraphCache`); loads files; wires parser → frontend → analysis → eval; holds builtins and optional Python state. Both **`oneil_cli`** and **`oneil_lsp`** depend on this, not on each backend crate separately. |
 | **`oneil_cli`** | The command-line interface: run files, print results and errors, file watching where supported, and a command that starts the language server (via **`oneil_lsp`**). |

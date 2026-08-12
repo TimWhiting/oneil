@@ -4,33 +4,40 @@ set -euo pipefail
 # Repository root (directory containing this script).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-NO_PYTHON=false
+WITH_PYTHON_COMPILER=false
 EDITABLE=false
 
 usage() {
 	cat <<'EOF'
 Usage: install.sh [options]
 
-  Builds and installs the Oneil CLI with Cargo. By default, also installs the
-  Python package (import oneil) for the current interpreter.
+  Builds and installs the Rust Oneil CLI with Cargo (default features:
+  `rust-lib` + `python-lib`). That build links PyO3 so models can `import`
+  ordinary `.py` files and so helper modules can `import oneil`.
 
 Options:
-  --no-python    Install the CLI only: no Python bindings and no pip package.
-  -e, --editable Install the Python package in editable mode (development).
-  -h, --help     Show this help.
+  --with-python-package   Also install the Python library via pip (`import oneil`
+                          from a standalone interpreter; not required for model
+                          `.py` imports when using the CLI).
+  -e, --editable          With --with-python-package, install it editable.
+  -h, --help              Show this help.
 
 Prerequisites:
   - Cargo (Rust): https://rustup.rs/
   - gcc (or another C toolchain Cargo can use for linking on this platform)
-  - For the default install: Python 3.10+ with pip (python3 -m pip / python -m pip)
-    and Python development headers (e.g. python3-devel on Fedora/RHEL,
-    python3-dev on Debian/Ubuntu)
+  - Python 3.10+ development headers (the CLI links against libpython for
+    model Python imports; e.g. python3-devel / python3-dev)
+  - For --with-python-package: Python 3.10+ with pip
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-	--no-python) NO_PYTHON=true ;;
+	--with-python-compiler | --with-python-package) WITH_PYTHON_COMPILER=true ;;
+	--no-python)
+		# Former default-off switch; kept so old invocations do not fail.
+		echo "Note: --no-python skips the pip Python library; the CLI still includes python-lib." >&2
+		;;
 	-e | --editable) EDITABLE=true ;;
 	-h | --help)
 		usage
@@ -45,8 +52,8 @@ while [[ $# -gt 0 ]]; do
 	shift
 done
 
-if [[ "$NO_PYTHON" == true && "$EDITABLE" == true ]]; then
-	echo "Note: --editable has no effect with --no-python." >&2
+if [[ "$EDITABLE" == true && "$WITH_PYTHON_COMPILER" == false ]]; then
+	echo "Note: --editable only applies with --with-python-package." >&2
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -77,60 +84,55 @@ EOF
 	exit 1
 fi
 
-ONEIL_PKG="$SCRIPT_DIR/src-rs/oneil"
+ONEIL_PKG="$SCRIPT_DIR/src/oneil"
 if [[ ! -f "$ONEIL_PKG/Cargo.toml" ]]; then
 	echo "Error: expected Cargo.toml at $ONEIL_PKG" >&2
 	exit 1
 fi
 
+# Resolve a Python interpreter for header checks (and optional pip install).
 PYTHON_CMD=""
-if [[ "$NO_PYTHON" == false ]]; then
-	if [[ ! -f "$SCRIPT_DIR/pyproject.toml" ]]; then
-		echo "Error: pyproject.toml not found at $SCRIPT_DIR" >&2
-		exit 1
-	fi
+if command -v python3 >/dev/null 2>&1; then
+	PYTHON_CMD="python3"
+elif command -v python >/dev/null 2>&1; then
+	PYTHON_CMD="python"
+else
+	cat <<'EOF' >&2
+Error: Python 3.10+ was not found (needed to link the Rust CLI's model Python support).
 
-	if command -v python3 >/dev/null 2>&1; then
-		PYTHON_CMD="python3"
-	elif command -v python >/dev/null 2>&1; then
-		PYTHON_CMD="python"
-	else
-		cat <<'EOF' >&2
-Error: Python 3.10+ is required for the library install but no python3/python was found.
-
-Install Python, or re-run with --no-python to install only the CLI with no Python bindings.
+Install Python and development headers, then re-run this script.
 EOF
-		exit 1
-	fi
+	exit 1
+fi
 
-	if ! "$PYTHON_CMD" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-		echo "Error: Python 3.10 or newer is required. Found: $($PYTHON_CMD --version 2>&1)" >&2
-		exit 1
-	fi
+if ! "$PYTHON_CMD" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+	echo "Error: Python 3.10 or newer is required. Found: $($PYTHON_CMD --version 2>&1)" >&2
+	exit 1
+fi
 
-	if ! "$PYTHON_CMD" -c 'import os, sys, sysconfig; inc=sysconfig.get_path("include"); sys.exit(0 if os.path.isfile(os.path.join(inc, "Python.h")) else 1)' 2>/dev/null; then
-		cat >&2 <<'EOF'
+if ! "$PYTHON_CMD" -c 'import os, sys, sysconfig; inc=sysconfig.get_path("include"); sys.exit(0 if os.path.isfile(os.path.join(inc, "Python.h")) else 1)' 2>/dev/null; then
+	cat >&2 <<'EOF'
 Error: Python development headers were not found (Python.h is missing).
 
-The CLI build links against Python; install headers before building.
+The Rust CLI links against Python so models can import `.py` files.
 
 Install the development package for your distribution, then re-run this script:
   Fedora/RHEL: sudo dnf install python3-devel
   Debian/Ubuntu: sudo apt install python3-dev
 EOF
-		exit 1
-	fi
+	exit 1
 fi
 
-echo "Installing Oneil CLI with Cargo..."
-if [[ "$NO_PYTHON" == true ]]; then
-	cargo install --force --path "$ONEIL_PKG" --no-default-features --features rust-lib
-else
-	cargo install --force --path "$ONEIL_PKG"
+if [[ "$WITH_PYTHON_COMPILER" == true && ! -f "$SCRIPT_DIR/pyproject.toml" ]]; then
+	echo "Error: pyproject.toml not found at $SCRIPT_DIR" >&2
+	exit 1
 fi
 
-if [[ "$NO_PYTHON" == false ]]; then
-	echo "Installing Oneil Python package..."
+echo "Installing Rust Oneil CLI (default features: rust-lib + python-lib)..."
+cargo install --force --path "$ONEIL_PKG"
+
+if [[ "$WITH_PYTHON_COMPILER" == true ]]; then
+	echo "Installing Python library (\`import oneil\`)..."
 	cd "$SCRIPT_DIR"
 	if [[ "$EDITABLE" == true ]]; then
 		"$PYTHON_CMD" -m pip install -e .

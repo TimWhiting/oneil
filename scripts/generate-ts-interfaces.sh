@@ -8,7 +8,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pkg_root="${repo_root}/packages/ts-interfaces"
 generated_dir="${pkg_root}/src/generated"
 
-cd "${repo_root}/src-rs"
+cd "${repo_root}/src"
 cargo run --quiet --example export_ts_interfaces -p oneil_cli --features oneil_cli/ts-bindings
 
 # Rebuild the barrel so new generated types are exported without hand edits.

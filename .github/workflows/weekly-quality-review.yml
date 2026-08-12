@@ -58,7 +58,7 @@ jobs:
       - name: Pick random crate and focus
         id: pick
         run: |
-          readarray -t crates < <(find src-rs -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/Cargo.toml' \; -printf '%f\n' | sort)
+          readarray -t crates < <(find src -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/Cargo.toml' \; -printf '%f\n' | sort)
           focuses=(implementation architecture testing)
 
           crate="${crates[RANDOM % ${#crates[@]}]}"
@@ -78,7 +78,7 @@ jobs:
         run: |
           case "$FOCUS" in
             implementation)
-              prompt="Review the Rust crate at src-rs/${CRATE}/ with a focus on implementation quality.
+              prompt="Review the Rust crate at src/${CRATE}/ with a focus on implementation quality.
 
           Read the crate thoroughly. Assess correctness, error handling, Rust idioms, clarity, and adherence to docs/CODING_STANDARDS.md where relevant.
 
@@ -88,7 +88,7 @@ jobs:
           ### Notes"
               ;;
             architecture)
-              prompt="Review the Rust crate at src-rs/${CRATE}/ with a focus on architecture.
+              prompt="Review the Rust crate at src/${CRATE}/ with a focus on architecture.
 
           Read the crate thoroughly. Assess module boundaries, coupling, separation of concerns, API surface, and how it fits the rest of the workspace, including what could be added to docs/CODING_STANDARDS.md to improve quality.
 
@@ -98,7 +98,7 @@ jobs:
           ### Notes"
               ;;
             testing)
-              prompt="Review the Rust crate at src-rs/${CRATE}/ with a focus on testing.
+              prompt="Review the Rust crate at src/${CRATE}/ with a focus on testing.
 
           Read the crate thoroughly. Assess unit/integration/snapshot/property test coverage, test design quality, reusable test helpers, simplicity, conciseness, and alignment with docs/CODING_STANDARDS.md testing guidance.
 
@@ -186,7 +186,7 @@ jobs:
           edit_prompt="The recommended changes are simple. Implement them now in the current working tree.
 
           Requirements:
-          - Apply the recommended fixes from your review to the relevant files under src-rs/${CRATE}/.
+          - Apply the recommended fixes from your review to the relevant files under src/${CRATE}/.
           - Run relevant checks if practical (e.g. cargo test -p ${CRATE}, cargo clippy -p ${CRATE}).
           - Do NOT run any git or gh commands (add, commit, push, checkout, branch, pr create). This workflow handles committing, pushing, and opening the PR itself once you are done.
           - Leave your edits as uncommitted changes in the working tree."

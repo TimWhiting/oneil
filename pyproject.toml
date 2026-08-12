@@ -9,7 +9,7 @@ authors = [
 	{ name = "Patrick Walton", email = "m.patrick.walton@gmail.com" },
 	{ name = "Brendon Bown", email = "brendon.bown@proton.me" },
 ]
-description = "Design specification language for system modeling"
+description = "Design specification language for system modeling (Rust CLI is primary; python-lib provides import oneil)"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -30,4 +30,4 @@ editable-profile = "dev"
 features = ["python-lib"]
 all-features = false
 no-default-features = true
-manifest-path = "src-rs/oneil/Cargo.toml"
+manifest-path = "src/oneil/Cargo.toml"

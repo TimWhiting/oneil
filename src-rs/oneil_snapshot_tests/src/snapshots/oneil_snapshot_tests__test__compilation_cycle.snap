@@ -1,7 +1,0 @@
----
-source: src-rs/oneil_snapshot_tests/src/test.rs
-expression: "run_fixture(\"compilation_cycle/a.on\")"
----
-error: compilation cycle detected: fixtures/compilation_cycle/a.on -> fixtures/compilation_cycle/b.on -> fixtures/compilation_cycle/a.on
-  at fixtures/compilation_cycle/a.on:11:10
-  help: break the cycle by removing one of the references along the chain

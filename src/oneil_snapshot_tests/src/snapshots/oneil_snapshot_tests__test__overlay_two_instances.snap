@@ -1,0 +1,11 @@
+---
+source: src/oneil_snapshot_tests/src/test.rs
+expression: "run_fixture(\"design_overlay/two_instances.on\")"
+---
+Model: fixtures/design_overlay/two_instances.on
+Tests: 0/0
+Parameters:
+  mass = 100 :kg
+  w_a = 372 :N
+  w_b = 981 :N
+  total = 1353 :N
