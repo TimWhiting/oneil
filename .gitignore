@@ -1,6 +1,8 @@
 __oncache__/
 __pycache__/
-.vscode/
+/.vscode/*
+!/.vscode/launch.json
+!/.vscode/tasks.json
 .venv/
 *.egg-info
 .vim/

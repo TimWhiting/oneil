@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-08-17
+
 ### Changed
+
+- The CLI links against an installed CPython 3.12 (it does not ship Python). Releases publish one archive per layout: Homebrew / system / uv on macOS, system / uv on Linux and Windows. The extension and `install-oneil` detect which layout is present and download that flavor.
 
 ## [1.0.0] - 2026-08-12
 

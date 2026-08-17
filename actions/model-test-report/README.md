@@ -110,7 +110,7 @@ Auto-discovery (no `models` input) only considers top-level `.on` and `.one` fil
 ## Requirements
 
 - No Rust toolchain is required; the CLI is downloaded from GitHub Releases.
-- Install Python (`actions/setup-python`) only if the models under test import Python functions. Models with no Python imports do not need it.
+- The release CLI links against Python 3.12. On Linux/Windows, `actions/setup-python` with `python-version: "3.12"` is enough for the `system` flavor. On macOS use `brew install python@3.12` or `uv python install 3.12` (`setup-python` does not create the python.org framework path).
 - Pin `oneil-ref` and the Action ref to the **same** Oneil release tag. When the test-report contract changes incompatibly, bump both together.
 
 ## Development

@@ -8,7 +8,7 @@
 
 ## Unreleased
 
-- Extension-managed CLI: download / update / select GitHub release versions for the language server
+- Extension-managed CLI: download / update / select GitHub release versions for the language server (1.x only, including 1.0.0 prereleases; 0.x hidden). “Latest” prefers stable 1.x and falls back to the newest 1.x beta. The release CLI needs Python 3.12; the extension picks the Homebrew, system, or uv archive that matches the machine.
 - Resolve note images and relative citation PDFs from the model file’s directory first, then the workspace root (same order as `references.bib`)
 
 ## v1.0.0 - 2026-08-12

@@ -17,22 +17,21 @@ let client: LanguageClient | undefined
 export async function activate(context: vscode.ExtensionContext) {
     registerImagePathDiagnostics(context)
 
-    // Ensure globalStorage exists for managed CLI downloads.
-    await vscode.workspace.fs.createDirectory(context.globalStorageUri)
-
-    client?.info("starting language server")
-    const resolved = await runActivateCliFlow(context, restartLanguageServer)
-    await restartLanguageServer(context)
-    client?.info("language server started")
-
-    const active = resolved ?? (await resolveCli(context))
-    if (shouldRunBackgroundUpdateCheck(context, active)) {
-        void checkForUpdates(context, restartLanguageServer, { silentIfCurrent: true })
-    }
-
-    // ── Commands ───────────────────────────────────────────────────────────────
+    // Register commands before any await that can block or throw (install
+    // prompt, GitHub, LSP start). Otherwise the palette lists the command
+    // from package.json but the handler is missing → "command not found".
+    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90)
+    statusBar.command = "oneil.pdf.toggleOfflineMode"
+    statusBar.tooltip = new vscode.MarkdownString(
+        "**Oneil PDF mode**\n\nClick to toggle between online (download) and offline (cache only) mode.\n\n" +
+        `Cache directory: \`${getCacheDirPath()}\``,
+    )
+    statusBar.tooltip.isTrusted = true
+    updateStatusBar(statusBar)
+    statusBar.show()
 
     context.subscriptions.push(
+        statusBar,
         vscode.commands.registerCommand("oneil.restartLanguageServer", () =>
             restartLanguageServer(context),
         ),
@@ -76,18 +75,24 @@ export async function activate(context: vscode.ExtensionContext) {
         ),
     )
 
-    // ── PDF offline-mode status bar item ───────────────────────────────────────
+    // Ensure globalStorage exists for managed CLI downloads.
+    await vscode.workspace.fs.createDirectory(context.globalStorageUri)
 
-    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90)
-    statusBar.command = "oneil.pdf.toggleOfflineMode"
-    statusBar.tooltip = new vscode.MarkdownString(
-        "**Oneil PDF mode**\n\nClick to toggle between online (download) and offline (cache only) mode.\n\n" +
-        `Cache directory: \`${getCacheDirPath()}\``,
-    )
-    statusBar.tooltip.isTrusted = true
-    updateStatusBar(statusBar)
-    statusBar.show()
-    context.subscriptions.push(statusBar)
+    client?.info("starting language server")
+    try {
+        const resolved = await runActivateCliFlow(context, restartLanguageServer)
+        await restartLanguageServer(context)
+        client?.info("language server started")
+
+        const active = resolved ?? (await resolveCli(context))
+        if (shouldRunBackgroundUpdateCheck(context, active)) {
+            void checkForUpdates(context, restartLanguageServer, { silentIfCurrent: true })
+        }
+    } catch (error) {
+        void vscode.window.showErrorMessage(
+            `Oneil: failed to start (${error instanceof Error ? error.message : String(error)})`,
+        )
+    }
 
     // Keep the status bar in sync when the setting changes externally.
     context.subscriptions.push(
@@ -166,7 +171,9 @@ async function buildOptions(
     }
 
     return {
-        serverOptions: { command, args },
+        serverOptions: resolved.env
+            ? { command, args, options: { env: resolved.env } }
+            : { command, args },
         clientOptions: {
             documentSelector: [
                 { scheme: "file", language: "oneil" },

@@ -20,7 +20,9 @@
     "type": "git",
     "url": "https://github.com/careweather/oneil.git"
   },
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [

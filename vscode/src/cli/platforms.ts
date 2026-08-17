@@ -3,11 +3,13 @@
  * Mirrors `actions/install-oneil/install.sh`.
  */
 
+import type { PythonFlavor } from "./python"
+
 export type CliPlatform = {
     /** Rust target triple used in release asset names. */
     triple: string
-    /** Archive filename for a given release tag (including `v` prefix). */
-    archiveName: (tag: string) => string
+    /** Archive extension published by the Release workflow. */
+    archiveExt: "tar.gz" | "zip"
     /** Binary name inside the archive. */
     binaryName: string
 }
@@ -22,25 +24,50 @@ export function resolveCliPlatform(
     if (platform === "linux" && arch === "x64") {
         return {
             triple: "x86_64-unknown-linux-gnu",
-            archiveName: (tag) => `oneil-${tag}-x86_64-unknown-linux-gnu.tar.gz`,
+            archiveExt: "tar.gz",
             binaryName: "oneil",
         }
     }
     if (platform === "win32" && arch === "x64") {
         return {
             triple: "x86_64-pc-windows-msvc",
-            archiveName: (tag) => `oneil-${tag}-x86_64-pc-windows-msvc.zip`,
+            archiveExt: "zip",
             binaryName: "oneil.exe",
         }
     }
     if (platform === "darwin" && arch === "arm64") {
         return {
             triple: "aarch64-apple-darwin",
-            archiveName: (tag) => `oneil-${tag}-aarch64-apple-darwin.tar.gz`,
+            archiveExt: "tar.gz",
             binaryName: "oneil",
         }
     }
     return undefined
+}
+
+/**
+ * Flavored archive name: `oneil-{tag}-{triple}-{flavor}.{ext}`.
+ */
+export function cliArchiveName(platform: CliPlatform, tag: string, flavor: PythonFlavor): string {
+    return `oneil-${tag}-${platform.triple}-${flavor}.${platform.archiveExt}`
+}
+
+/**
+ * Pre-flavor archive name used by older 1.x releases.
+ */
+export function cliUnflavoredArchiveName(platform: CliPlatform, tag: string): string {
+    return `oneil-${tag}-${platform.triple}.${platform.archiveExt}`
+}
+
+/**
+ * Asset names to try for a tag, flavored first, then the unflavored fallback.
+ */
+export function cliAssetCandidates(
+    platform: CliPlatform,
+    tag: string,
+    flavor: PythonFlavor,
+): string[] {
+    return [cliArchiveName(platform, tag, flavor), cliUnflavoredArchiveName(platform, tag)]
 }
 
 /** Human-readable list of platforms that publish CLI archives. */

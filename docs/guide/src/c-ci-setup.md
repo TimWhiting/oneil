@@ -20,7 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Only needed if models import Python functions:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -107,14 +106,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: careweather/oneil/actions/install-oneil@v1.0.0
-        with:
-          version: v1.0.0
-
-      # Only needed if models import Python functions:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - uses: careweather/oneil/actions/install-oneil@v1.0.0
+        with:
+          version: v1.0.0
 
       - run: oneil test --recursive model/radar.on
 ```

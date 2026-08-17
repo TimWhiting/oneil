@@ -11,9 +11,38 @@ import type * as vscode from "vscode"
 
 import { fetchCliReleaseByTag, type GithubRelease } from "./github"
 import { resolveCliPlatform, SUPPORTED_PLATFORMS_LABEL } from "./platforms"
+import {
+    detectPython312,
+    launchEnvForFlavor,
+    missingPythonHint,
+    type PythonFlavor,
+} from "./python"
+import { setInstalledPythonFlavor } from "./state"
 import { toReleaseTag } from "./version"
 
 const execFileAsync = promisify(execFile)
+
+/** Shown when no supported Python 3.12 layout is present. */
+export const PYTHON_312_HINT = missingPythonHint()
+
+/**
+ * True when `command --version` starts successfully.
+ */
+export async function cliBinaryRuns(
+    command: string,
+    env?: NodeJS.ProcessEnv,
+): Promise<boolean> {
+    try {
+        await execFileAsync(command, ["--version"], {
+            timeout: 10_000,
+            windowsHide: true,
+            env,
+        })
+        return true
+    } catch {
+        return false
+    }
+}
 
 /**
  * Absolute path to the managed CLI binary for this host, or `undefined` if
@@ -87,6 +116,12 @@ export async function installCliRelease(
             }
         }
 
+        await setInstalledPythonFlavor(context, release.flavor)
+        const env = await launchEnvForFlavor(release.flavor)
+        if (!(await cliBinaryRuns(dest, env))) {
+            throw new Error(missingPythonHint())
+        }
+
         return dest
     } finally {
         await fs.rm(tmpRoot, { recursive: true, force: true })
@@ -106,8 +141,20 @@ export async function installCliTag(
             `This platform is not supported for release binaries (${SUPPORTED_PLATFORMS_LABEL}).`,
         )
     }
-    const release = await fetchCliReleaseByTag(toReleaseTag(tagOrVersion), platform)
+    const flavor = await requireDetectedFlavor()
+    const release = await fetchCliReleaseByTag(toReleaseTag(tagOrVersion), platform, flavor)
     return installCliRelease(context, release)
+}
+
+/**
+ * Detects a supported Python 3.12 layout or throws a user-facing hint.
+ */
+export async function requireDetectedFlavor(): Promise<PythonFlavor> {
+    const detected = await detectPython312()
+    if (!detected) {
+        throw new Error(missingPythonHint())
+    }
+    return detected.flavor
 }
 
 async function downloadFile(url: string, dest: string): Promise<void> {

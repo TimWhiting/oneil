@@ -5,8 +5,11 @@
 
 import type * as vscode from "vscode"
 
+import { isPythonFlavor, type PythonFlavor } from "./python"
+
 export const STATE_LAST_UPDATE_CHECK = "oneil.cli.lastUpdateCheck"
 export const STATE_SKIPPED_VERSION = "oneil.cli.skippedVersion"
+export const STATE_PYTHON_FLAVOR = "oneil.cli.pythonFlavor"
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
@@ -43,4 +46,22 @@ export async function setSkippedVersion(
     version: string | undefined,
 ): Promise<void> {
     await context.globalState.update(STATE_SKIPPED_VERSION, version)
+}
+
+/**
+ * Python 3.12 layout of the managed binary last written to globalStorage.
+ */
+export function getInstalledPythonFlavor(context: vscode.ExtensionContext): PythonFlavor | undefined {
+    const value = context.globalState.get<string>(STATE_PYTHON_FLAVOR)
+    return isPythonFlavor(value) ? value : undefined
+}
+
+/**
+ * Records which Python flavor the managed binary was downloaded for.
+ */
+export async function setInstalledPythonFlavor(
+    context: vscode.ExtensionContext,
+    flavor: PythonFlavor | undefined,
+): Promise<void> {
+    await context.globalState.update(STATE_PYTHON_FLAVOR, flavor)
 }

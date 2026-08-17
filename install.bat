@@ -71,22 +71,31 @@ if not exist "%ONEIL_PKG%\Cargo.toml" (
 )
 
 set "PYTHON_CMD="
-where python3 >nul 2>&1
-if not errorlevel 1 set "PYTHON_CMD=python3"
+where uv >nul 2>&1
+if not errorlevel 1 (
+  for /f "usebackq delims=" %%P in (`uv python find 3.12 2^>nul`) do set "PYTHON_CMD=%%P"
+)
+if not defined PYTHON_CMD (
+  where python3 >nul 2>&1
+  if not errorlevel 1 set "PYTHON_CMD=python3"
+)
 if not defined PYTHON_CMD (
   where python >nul 2>&1
   if not errorlevel 1 set "PYTHON_CMD=python"
 )
 if not defined PYTHON_CMD (
-  echo Error: Python 3.10+ was not found ^(needed to link the Rust CLI's model Python support^). 1>&2
+  echo Error: Python 3.12 was not found ^(needed to link the Rust CLI's model Python support^). 1>&2
   echo. 1>&2
-  echo Install Python and development headers, then re-run this script. 1>&2
+  echo Install it with: uv python install 3.12 1>&2
   exit /b 1
 )
 
-%PYTHON_CMD% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+set "PYO3_PYTHON=%PYTHON_CMD%"
+
+%PYTHON_CMD% -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
 if errorlevel 1 (
-  for /f "usebackq delims=" %%V in (`%PYTHON_CMD% --version 2^>^&1`) do echo Error: Python 3.10 or newer is required. Found: %%V 1>&2
+  for /f "usebackq delims=" %%V in (`%PYTHON_CMD% --version 2^>^&1`) do echo Error: Oneil supports Python 3.12. Found: %%V 1>&2
+  echo Install 3.12 with: uv python install 3.12 1>&2
   exit /b 1
 )
 
@@ -161,6 +170,6 @@ echo.
 echo Prerequisites:
 echo   - Cargo ^(Rust^): https://rustup.rs/
 echo   - gcc ^(or MSVC with the windows-msvc Rust target; see error text if checks fail^)
-echo   - Python 3.10+ development headers ^(CLI links libpython for model imports^)
-echo   - For --with-python-package: Python 3.10+ with pip
+echo   - Python 3.12 development headers ^(uv python install 3.12^)
+echo   - For --with-python-package: Python 3.12 with pip
 goto :eof

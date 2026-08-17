@@ -6,12 +6,9 @@ Thank you for your interest in contributing to the Oneil VS Code extension! This
 
 ### Running the extension locally
 
-In order to run/debug the extension locally, follow the instructions from the
-[VS Code docs](https://code.visualstudio.com/api/get-started/your-first-extension):
+From the repo root, press `F5` (or **Debug: Start Debugging**) to run **Run Oneil Extension**. That builds the extension and webview, then opens an Extension Development Host on `examples/` so you can try notes, citations, and the Rendered View.
 
-> Inside the editor, [ ... ] press `F5` or run the command > `Debug: Start
-> Debugging` from the Command Palette (`Ctrl+Shift+P`). This will > compile and
-> run the extension in a new Extension Development Host window.
+The first time, run `npm install` in `vscode/` and `vscode/model-renderer/`. To use a local `oneil` CLI instead of the managed download, set `oneil.serverPath` in the host window (for example `~/.cargo/bin/oneil`).
 
 ### Syntax highlighting
 

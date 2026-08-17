@@ -10,7 +10,9 @@ import { execFile } from "child_process"
 import { promisify } from "util"
 import * as vscode from "vscode"
 
-import { managedBinaryExists, managedBinaryPath } from "./install"
+import { cliBinaryRuns, managedBinaryExists, managedBinaryPath } from "./install"
+import { launchEnvForFlavor, missingPythonHint, type PythonFlavor } from "./python"
+import { getInstalledPythonFlavor } from "./state"
 import { parseVersionOutput } from "./version"
 
 const execFileAsync = promisify(execFile)
@@ -20,6 +22,10 @@ export type ResolvedCli = {
     command: string
     /** Where the command came from. */
     source: "serverPath" | "managed" | "env" | "path"
+    /** Extra env for the managed uv (and some system) flavors. */
+    env?: NodeJS.ProcessEnv
+    /** Python layout of the managed binary, when known. */
+    flavor?: PythonFlavor
 }
 
 /**
@@ -34,8 +40,13 @@ export async function resolveCli(context: vscode.ExtensionContext): Promise<Reso
 
     if (await managedBinaryExists(context)) {
         const command = managedBinaryPath(context)
+        const flavor = getInstalledPythonFlavor(context)
+        const env = flavor ? await launchEnvForFlavor(flavor) : undefined
+        if (command && (await cliBinaryRuns(command, env))) {
+            return { command, source: "managed", env, flavor }
+        }
         if (command) {
-            return { command, source: "managed" }
+            void vscode.window.showWarningMessage(`Oneil: ${missingPythonHint()}`)
         }
     }
 
@@ -54,11 +65,15 @@ export async function resolveCli(context: vscode.ExtensionContext): Promise<Reso
 /**
  * Runs `<command> --version` and returns the normalized version id.
  */
-export async function readCliVersion(command: string): Promise<string | undefined> {
+export async function readCliVersion(
+    command: string,
+    env?: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
     try {
         const { stdout } = await execFileAsync(command, ["--version"], {
             timeout: 10_000,
             windowsHide: true,
+            env,
         })
         return parseVersionOutput(stdout)
     } catch {

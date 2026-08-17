@@ -5,7 +5,7 @@
 import * as vscode from "vscode"
 
 import { fetchLatestCliRelease, listCliReleases, type GithubRelease } from "./github"
-import { installCliRelease } from "./install"
+import { installCliRelease, requireDetectedFlavor } from "./install"
 import {
     getSkippedVersion,
     markUpdateChecked,
@@ -92,7 +92,8 @@ export async function checkForUpdates(
 
     let latest: GithubRelease
     try {
-        latest = await fetchLatestCliRelease(platform)
+        const flavor = await requireDetectedFlavor()
+        latest = await fetchLatestCliRelease(platform, flavor)
     } catch (error) {
         void vscode.window.showErrorMessage(
             `Oneil: could not check for updates (${error instanceof Error ? error.message : String(error)})`,
@@ -113,7 +114,7 @@ export async function checkForUpdates(
         return
     }
 
-    const current = await readCliVersion(resolved.command)
+    const current = await readCliVersion(resolved.command, resolved.env)
     const latestId = normalizeVersionId(latest.tag)
     if (latestId == null) {
         void vscode.window.showErrorMessage(
@@ -179,7 +180,8 @@ export async function installLatestWithProgress(
     }
 
     try {
-        const latest = await fetchLatestCliRelease(platform)
+        const flavor = await requireDetectedFlavor()
+        const latest = await fetchLatestCliRelease(platform, flavor)
         await installReleaseWithProgress(context, latest, restart)
     } catch (error) {
         void vscode.window.showErrorMessage(
@@ -213,7 +215,8 @@ export async function selectCliVersion(
 
     let releases: GithubRelease[]
     try {
-        releases = await listCliReleases(platform)
+        const flavor = await requireDetectedFlavor()
+        releases = await listCliReleases(platform, flavor)
     } catch (error) {
         void vscode.window.showErrorMessage(
             `Oneil: could not list releases (${error instanceof Error ? error.message : String(error)})`,
@@ -227,7 +230,7 @@ export async function selectCliVersion(
     }
 
     const resolved = await resolveCli(context)
-    const current = resolved ? await readCliVersion(resolved.command) : undefined
+    const current = resolved ? await readCliVersion(resolved.command, resolved.env) : undefined
 
     const items: vscode.QuickPickItem[] = releases.map((release) => {
         const id = normalizeVersionId(release.tag)
