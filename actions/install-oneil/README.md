@@ -24,6 +24,14 @@ Prefer this Action when your workflow needs `oneil` directly (custom scripts, ad
 
 Pin the Action ref and `version` to the **same** release tag.
 
+The same script is attached to each GitHub Release as `install-oneil.sh` (stamped with that tag). Locally:
+
+```sh
+curl -fsSL https://github.com/careweather/oneil/releases/download/v1.0.0/install-oneil.sh | bash
+```
+
+That installs into `~/.local/bin` (override with `ONEIL_INSTALL_DIR`). In Actions, prefer the composite Action above so `GITHUB_PATH` / outputs are set.
+
 ## Inputs
 
 | Input | Required | Default | Description |

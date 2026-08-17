@@ -20,6 +20,16 @@ Pushing a version tag (for example `v1.0.0`) runs the Release workflow, which bu
 
 ### Linux / macOS
 
+The release also attaches `install-oneil.sh`, which detects Homebrew / uv / system Python 3.12 and downloads that archive into `~/.local/bin`:
+
+```sh
+curl -fsSL https://github.com/careweather/oneil/releases/latest/download/install-oneil.sh | bash
+# or a specific tag:
+curl -fsSL https://github.com/careweather/oneil/releases/download/v1.0.0/install-oneil.sh | bash
+```
+
+To pick the archive yourself:
+
 1. Open the [latest release](https://github.com/careweather/oneil/releases/latest).
 2. Download the archive for your OS, architecture, and Python layout (for example `oneil-v1.0.0-x86_64-unknown-linux-gnu-system.tar.gz` or `oneil-v1.0.0-aarch64-apple-darwin-homebrew.tar.gz`).
 3. Unpack and put the `oneil` binary on your `PATH`:

@@ -1,9 +1,79 @@
 #!/usr/bin/env bash
-# Download a Oneil CLI release archive and put it on PATH.
-# Expected env: ONEIL_VERSION, and optionally GH_TOKEN / GITHUB_TOKEN for gh.
+# Download a Oneil CLI release archive and put `oneil` on PATH.
+#
+# GitHub Actions: set ONEIL_VERSION (and optionally GH_TOKEN). Writes GITHUB_PATH /
+# GITHUB_ENV / GITHUB_OUTPUT when those files exist.
+#
+# Local: ONEIL_VERSION or the first argument, else DEFAULT_ONEIL_VERSION (stamped
+# when this file is attached to a GitHub Release). Installs into
+# "${ONEIL_INSTALL_DIR:-$HOME/.local/bin}".
 set -euo pipefail
 
-case "${RUNNER_OS}/${RUNNER_ARCH}" in
+# Stamped by the Release workflow when attaching this script as install-oneil.sh.
+DEFAULT_ONEIL_VERSION=""
+
+in_gha() {
+  [[ "${GITHUB_ACTIONS:-}" == "true" ]]
+}
+
+err() {
+  if in_gha; then
+    echo "::error::$*"
+  else
+    echo "Error: $*" >&2
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+Download a Oneil CLI release binary and install it.
+
+Usage:
+  ONEIL_VERSION=v1.0.0 bash install-oneil.sh
+  bash install-oneil.sh v1.0.0
+
+Environment:
+  ONEIL_VERSION       Release tag (required unless stamped or passed as $1)
+  ONEIL_INSTALL_DIR   Local install directory (default: ~/.local/bin)
+  GH_TOKEN            Optional; used by `gh release download` for rate limits
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+ONEIL_VERSION="${ONEIL_VERSION:-${1:-${DEFAULT_ONEIL_VERSION}}}"
+if [[ -z "${ONEIL_VERSION}" ]]; then
+  err "Set ONEIL_VERSION or pass a release tag (e.g. v1.0.0)."
+  exit 1
+fi
+
+if in_gha; then
+  OS_NAME="${RUNNER_OS}"
+  ARCH_NAME="${RUNNER_ARCH}"
+else
+  case "$(uname -s)" in
+    Linux) OS_NAME="Linux" ;;
+    Darwin) OS_NAME="macOS" ;;
+    MINGW*|MSYS*|CYGWIN*) OS_NAME="Windows" ;;
+    *)
+      err "Unsupported OS: $(uname -s) (release binaries cover Linux x86_64, Windows x86_64, and Apple Silicon macOS)"
+      exit 1
+      ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) ARCH_NAME="X64" ;;
+    arm64|aarch64) ARCH_NAME="ARM64" ;;
+    *)
+      err "Unsupported architecture: $(uname -m)"
+      exit 1
+      ;;
+  esac
+fi
+
+case "${OS_NAME}/${ARCH_NAME}" in
   Linux/X64)
     triple="x86_64-unknown-linux-gnu"
     ext="tar.gz"
@@ -20,13 +90,13 @@ case "${RUNNER_OS}/${RUNNER_ARCH}" in
     binary_name="oneil"
     ;;
   *)
-    echo "::error::Unsupported runner: ${RUNNER_OS}/${RUNNER_ARCH} (release binaries cover Linux x86_64, Windows x86_64, and Apple Silicon macOS)"
+    err "Unsupported runner: ${OS_NAME}/${ARCH_NAME} (release binaries cover Linux x86_64, Windows x86_64, and Apple Silicon macOS)"
     exit 1
     ;;
 esac
 
 detect_flavor() {
-  if [[ "${RUNNER_OS}" == "macOS" ]] \
+  if [[ "${OS_NAME}" == "macOS" ]] \
     && [[ -e /opt/homebrew/opt/python@3.12/Frameworks/Python.framework/Versions/3.12/Python ]]; then
     echo homebrew
     return
@@ -37,13 +107,13 @@ detect_flavor() {
     return
   fi
 
-  if [[ "${RUNNER_OS}" == "macOS" ]] \
+  if [[ "${OS_NAME}" == "macOS" ]] \
     && [[ -e /Library/Frameworks/Python.framework/Versions/3.12/Python ]]; then
     echo system
     return
   fi
 
-  if [[ "${RUNNER_OS}" == "Linux" ]] \
+  if [[ "${OS_NAME}" == "Linux" ]] \
     && { [[ -e /usr/lib/x86_64-linux-gnu/libpython3.12.so.1.0 ]] \
       || [[ -e /usr/lib64/libpython3.12.so.1.0 ]] \
       || command -v python3.12 >/dev/null 2>&1; }; then
@@ -51,7 +121,7 @@ detect_flavor() {
     return
   fi
 
-  if [[ "${RUNNER_OS}" == "Windows" ]]; then
+  if [[ "${OS_NAME}" == "Windows" ]]; then
     if py -3.12 -c "import sys" >/dev/null 2>&1 || python3.12 -c "import sys" >/dev/null 2>&1; then
       echo system
       return
@@ -76,15 +146,21 @@ export_lib_path() {
   if [[ -z "${libdir}" ]]; then
     return
   fi
-  if [[ "${RUNNER_OS}" == "macOS" ]]; then
+  if [[ "${OS_NAME}" == "macOS" ]]; then
     export DYLD_LIBRARY_PATH="${libdir}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
-    echo "DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
-  elif [[ "${RUNNER_OS}" == "Linux" ]]; then
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+      echo "DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+    fi
+  elif [[ "${OS_NAME}" == "Linux" ]]; then
     export LD_LIBRARY_PATH="${libdir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-    echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+      echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+    fi
   else
     export PATH="${libdir}:${PATH}"
-    echo "${libdir}" >> "${GITHUB_PATH}"
+    if [[ -n "${GITHUB_PATH:-}" ]]; then
+      echo "${libdir}" >> "${GITHUB_PATH}"
+    fi
   fi
 }
 
@@ -104,15 +180,15 @@ try_download() {
 
 flavor="$(detect_flavor || true)"
 if [[ -z "${flavor}" ]]; then
-  echo "::error::Need Python 3.12 to run the release CLI (system, uv, or Homebrew python@3.12 on macOS)."
+  err "Need Python 3.12 to run the release CLI (system, uv, or Homebrew python@3.12 on macOS)."
   exit 1
 fi
 
 if [[ "${flavor}" == "uv" ]]; then
   export_lib_path "$(uv python find 3.12)"
-elif [[ "${flavor}" == "system" && "${RUNNER_OS}" == "Linux" ]] && command -v python3.12 >/dev/null 2>&1; then
+elif [[ "${flavor}" == "system" && "${OS_NAME}" == "Linux" ]] && command -v python3.12 >/dev/null 2>&1; then
   export_lib_path "$(command -v python3.12)"
-elif [[ "${flavor}" == "system" && "${RUNNER_OS}" == "Windows" ]]; then
+elif [[ "${flavor}" == "system" && "${OS_NAME}" == "Windows" ]]; then
   if py -3.12 -c "import sys" >/dev/null 2>&1; then
     export_lib_path "$(py -3.12 -c "import sys; print(sys.executable)")"
   elif command -v python3.12 >/dev/null 2>&1; then
@@ -120,9 +196,13 @@ elif [[ "${flavor}" == "system" && "${RUNNER_OS}" == "Windows" ]]; then
   fi
 fi
 
-install_dir="${RUNNER_TEMP}/oneil-${ONEIL_VERSION}"
-mkdir -p "${install_dir}"
-cd "${install_dir}"
+if in_gha; then
+  work_dir="${RUNNER_TEMP}/oneil-${ONEIL_VERSION}"
+else
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/oneil-install.XXXXXX")"
+fi
+mkdir -p "${work_dir}"
+cd "${work_dir}"
 
 flavored="oneil-${ONEIL_VERSION}-${triple}-${flavor}.${ext}"
 unflavored="oneil-${ONEIL_VERSION}-${triple}.${ext}"
@@ -134,7 +214,7 @@ elif try_download "${unflavored}"; then
   echo "No ${flavored}; using unflavored archive from an older release"
   archive="${unflavored}"
 else
-  echo "::error::Could not download ${flavored} or ${unflavored}"
+  err "Could not download ${flavored} or ${unflavored}"
   exit 1
 fi
 
@@ -152,27 +232,42 @@ else
 fi
 
 if [[ ! -f "${binary_name}" ]]; then
-  echo "::error::Expected ${binary_name} in ${archive}"
+  err "Expected ${binary_name} in ${archive}"
   ls -la
   exit 1
 fi
 
 chmod +x "${binary_name}"
-oneil_path="$(pwd)/${binary_name}"
 
-# Soften macOS Gatekeeper when running unsigned release binaries in CI.
-if [[ "${RUNNER_OS}" == "macOS" ]] && command -v xattr >/dev/null 2>&1; then
-  xattr -d com.apple.quarantine "${oneil_path}" 2>/dev/null || true
+if [[ "${OS_NAME}" == "macOS" ]] && command -v xattr >/dev/null 2>&1; then
+  xattr -d com.apple.quarantine "${binary_name}" 2>/dev/null || true
 fi
 
-echo "${install_dir}" >> "${GITHUB_PATH}"
-export PATH="${install_dir}:${PATH}"
+if in_gha; then
+  oneil_path="$(pwd)/${binary_name}"
+  echo "${work_dir}" >> "${GITHUB_PATH}"
+  export PATH="${work_dir}:${PATH}"
+else
+  dest_dir="${ONEIL_INSTALL_DIR:-${HOME}/.local/bin}"
+  mkdir -p "${dest_dir}"
+  mv "${binary_name}" "${dest_dir}/${binary_name}"
+  oneil_path="${dest_dir}/${binary_name}"
+  export PATH="${dest_dir}:${PATH}"
+fi
 
-if ! version_line="$("${oneil_path}" --version 2>"${RUNNER_TEMP}/oneil-version.err")"; then
-  echo "::error::Installed oneil failed \`--version\` (flavor=${flavor}). Install matching Python 3.12."
-  cat "${RUNNER_TEMP}/oneil-version.err" >&2 || true
+version_err="$(mktemp "${TMPDIR:-/tmp}/oneil-version.XXXXXX")"
+if ! version_line="$("${oneil_path}" --version 2>"${version_err}")"; then
+  err "Installed oneil failed \`--version\` (flavor=${flavor}). Install matching Python 3.12."
+  cat "${version_err}" >&2 || true
+  rm -f "${version_err}"
   exit 1
 fi
-echo "Installed ${version_line} (${flavor})"
-echo "version=${version_line}" >> "${GITHUB_OUTPUT}"
-echo "oneil-path=${oneil_path}" >> "${GITHUB_OUTPUT}"
+rm -f "${version_err}"
+
+echo "Installed ${version_line} (${flavor}) at ${oneil_path}"
+if in_gha; then
+  echo "version=${version_line}" >> "${GITHUB_OUTPUT}"
+  echo "oneil-path=${oneil_path}" >> "${GITHUB_OUTPUT}"
+elif [[ "${flavor}" == "uv" ]]; then
+  echo "The uv flavor needs the Python 3.12 library on the loader path in this shell (DYLD_LIBRARY_PATH / LD_LIBRARY_PATH / PATH)."
+fi

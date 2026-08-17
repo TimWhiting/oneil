@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-08-17
+
+### Added
+
+- Releases attach `install-oneil.sh`, which detects the local Python 3.12 layout and downloads the matching CLI archive (same script the `install-oneil` Action runs).
+
+### Fixed
+
+- The VS Code / Cursor extension lists git tags and downloads archives from `github.com/releases/download` instead of `GET /repos/.../releases`, which 504'd once each release shipped multiple CLI flavors.
+
 ## [1.0.0-beta.5] - 2026-08-17
 
 ### Changed

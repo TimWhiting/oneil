@@ -208,6 +208,27 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Attach install-oneil.sh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cp actions/install-oneil/install.sh artifacts/install-oneil.sh
+          python3 - <<'PY'
+          import os
+          import pathlib
+
+          path = pathlib.Path("artifacts/install-oneil.sh")
+          tag = os.environ["TAG"]
+          text = path.read_text(encoding="utf-8")
+          old = 'DEFAULT_ONEIL_VERSION=""'
+          new = f'DEFAULT_ONEIL_VERSION="{tag}"'
+          if old not in text:
+              raise SystemExit("DEFAULT_ONEIL_VERSION placeholder missing from install.sh")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          print(f"Stamped {path} with {tag}")
+          PY
+
       - name: Build release notes
         id: notes
         env:
@@ -242,6 +263,12 @@ jobs:
           - Linux: `oneil-v{version}-x86_64-unknown-linux-gnu-system.tar.gz`, `…-uv.tar.gz`
           - Windows: `oneil-v{version}-x86_64-pc-windows-msvc-system.zip`, `…-uv.zip`
           - Apple Silicon macOS: `oneil-v{version}-aarch64-apple-darwin-homebrew.tar.gz`, `…-system.tar.gz`, `…-uv.tar.gz`
+
+          Or run the attached installer (detects the Python layout and downloads that archive):
+
+          ```sh
+          curl -fsSL https://github.com/careweather/oneil/releases/download/v{version}/install-oneil.sh | bash
+          ```
 
           See the [installation guide](https://careweather.github.io/oneil/02-installation.html).
 
