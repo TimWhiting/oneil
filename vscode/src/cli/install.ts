@@ -9,8 +9,8 @@ import { execFile } from "child_process"
 import { promisify } from "util"
 import type * as vscode from "vscode"
 
-import { fetchCliReleaseByTag, type GithubRelease } from "./github"
-import { resolveCliPlatform, SUPPORTED_PLATFORMS_LABEL } from "./platforms"
+import { fetchCliReleaseByTag, releaseDownloadUrl, type GithubRelease } from "./github"
+import { cliAssetCandidates, resolveCliPlatform, SUPPORTED_PLATFORMS_LABEL, type CliPlatform } from "./platforms"
 import {
     detectPython312,
     launchEnvForFlavor,
@@ -90,17 +90,16 @@ export async function installCliRelease(
     await fs.mkdir(storageRoot, { recursive: true })
 
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "oneil-cli-"))
-    const archivePath = path.join(tmpRoot, release.assetName)
 
     try {
-        await downloadFile(release.assetUrl, archivePath)
+        const { archivePath, assetName } = await downloadReleaseArchive(release, platform, tmpRoot)
         await extractArchive(archivePath, tmpRoot)
 
         const extracted = path.join(tmpRoot, platform.binaryName)
         try {
             await fs.access(extracted)
         } catch {
-            throw new Error(`Archive ${release.assetName} did not contain ${platform.binaryName}`)
+            throw new Error(`Archive ${assetName} did not contain ${platform.binaryName}`)
         }
 
         const dest = path.join(storageRoot, platform.binaryName)
@@ -155,6 +154,29 @@ export async function requireDetectedFlavor(): Promise<PythonFlavor> {
         throw new Error(missingPythonHint())
     }
     return detected.flavor
+}
+
+async function downloadReleaseArchive(
+    release: GithubRelease,
+    platform: CliPlatform,
+    destDir: string,
+): Promise<{ archivePath: string; assetName: string }> {
+    const names = cliAssetCandidates(platform, release.tag, release.flavor)
+    let lastError: Error | undefined
+    for (const assetName of names) {
+        const url = releaseDownloadUrl(release.tag, assetName)
+        const archivePath = path.join(destDir, assetName)
+        try {
+            await downloadFile(url, archivePath)
+            return { archivePath, assetName }
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error))
+            if (!lastError.message.includes("HTTP 404")) {
+                throw lastError
+            }
+        }
+    }
+    throw lastError ?? new Error(`No CLI archive for ${release.tag}`)
 }
 
 async function downloadFile(url: string, dest: string): Promise<void> {
