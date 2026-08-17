@@ -1,0 +1,4 @@
+submodel mars as m
+
+Spacecraft mass: m = 500 :kg
+$ Surface weight: W = m * g.m :N

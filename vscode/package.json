@@ -1,0 +1,208 @@
+{
+  "name": "oneil",
+  "displayName": "Oneil",
+  "description": "VS Code support for the Oneil design specification language",
+  "icon": "./icons/oneil-logo-large.png",
+  "version": "1.0.0",
+  "publisher": "careweather",
+  "license": "MPL-2.0",
+  "engines": {
+    "vscode": "^1.0.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "bugs": {
+    "url": "https://github.com/careweather/oneil/issues"
+  },
+  "homepage": "https://github.com/careweather/oneil",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/careweather/oneil.git"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "oneil.restartLanguageServer",
+        "title": "Oneil: Restart Language Server",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "oneil.openRenderedView",
+        "title": "Oneil: Open Rendered View",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "oneil.reloadRenderedView",
+        "title": "Oneil: Reload Rendered View",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "oneil.pdf.toggleOfflineMode",
+        "title": "Oneil: Toggle PDF Offline Mode",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "oneil.cli.checkForUpdates",
+        "title": "Oneil: Check for CLI Updates"
+      },
+      {
+        "command": "oneil.cli.installOrUpdate",
+        "title": "Oneil: Install or Update CLI"
+      },
+      {
+        "command": "oneil.cli.selectVersion",
+        "title": "Oneil: Select CLI Version…"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "oneil.openRenderedView",
+          "when": "resourceLangId == oneil",
+          "group": "navigation"
+        },
+        {
+          "command": "oneil.restartLanguageServer",
+          "when": "resourceLangId == oneil",
+          "group": "navigation"
+        },
+        {
+          "command": "oneil.reloadRenderedView",
+          "when": "activeWebviewPanelId == oneilRenderedView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Oneil",
+      "properties": {
+        "oneil.serverPath": {
+          "type": "string",
+          "default": null,
+          "description": "Path to the Oneil language server executable. When set, this always wins over the extension-managed CLI, ONEIL_PATH, and PATH. Leave empty to use a managed install, ONEIL_PATH, or \"oneil\" on PATH."
+        },
+        "oneil.cli.autoCheckUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically check GitHub Releases for Oneil CLI updates (at most once per day). Disabled while oneil.serverPath is set. Use “Skip this version” on the update prompt to suppress a particular release."
+        },
+        "oneil.cacheReadPolicy": {
+          "type": "string",
+          "default": "always",
+          "description": "When to read from the Python call cache.",
+          "enum": [
+            "always",
+            "prompt",
+            "never"
+          ]
+        },
+        "oneil.cacheWritePolicy": {
+          "type": "string",
+          "default": "always",
+          "description": "When to write to the Python call cache.",
+          "enum": [
+            "always",
+            "prompt",
+            "never"
+          ]
+        },
+        "oneil.workspaceDiscovery.skipDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "node_modules",
+            "target",
+            "venv",
+            "__pycache__",
+            "__oncache__"
+          ],
+          "description": "Directory names to skip while discovering model files in the workspace. Hidden directories (names starting with \".\") are always skipped in addition to these names. Set to an empty array to skip only hidden directories. If a large directory does not contain any model files, adding it here may improve startup time without disabling workspace discovery entirely."
+        },
+        "oneil.workspaceDiscovery.disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Do not scan the workspace for model files at startup. This improves LSP startup time, but may cause certain features such as renaming to work incorrectly. Open files are still checked as usual."
+        },
+        "oneil.pdf.cacheDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory where citation PDFs are cached. Supports ~ expansion. Defaults to ~/.local/oneil/resources."
+        },
+        "oneil.pdf.autoDownload": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically download citation PDFs to the local cache when opened (no prompt). If false, you are asked each time."
+        },
+        "oneil.pdf.offlineOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Offline mode: only open PDFs that are already in the local cache. Remote URLs will not be followed. Toggle via the status bar or the 'Oneil: Toggle PDF Offline Mode' command."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "oneil",
+        "aliases": [
+          "Oneil",
+          "oneil"
+        ],
+        "extensions": [
+          ".on",
+          ".one"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/oneil-logo.svg",
+          "dark": "./icons/oneil-logo.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "oneil",
+        "scopeName": "source.oneil",
+        "path": "./syntaxes/oneil.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.latex": "latex",
+          "meta.embedded.markdown": "markdown"
+        },
+        "tokenTypes": {
+          "meta.embedded.latex": "other"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle -- --production && npm run build:webview",
+    "bundle": "node esbuild.mjs",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build:webview": "npm --prefix model-renderer run build",
+    "watch:webview": "npm --prefix model-renderer run watch",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "semver": "^7.8.5",
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.x",
+    "@types/semver": "^7.8.0",
+    "@types/vscode": "^1.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.6"
+  }
+}

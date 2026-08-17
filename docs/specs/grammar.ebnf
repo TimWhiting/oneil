@@ -1,0 +1,150 @@
+(* Oneil Language Grammar in EBNF *)
+
+(* IMPORTANT: Any time this is updated, `docs/guide/theme/highlight.js` and
+              `vscode/syntaxes/oneil.tmLanguage.json` should also be updated. *)
+
+(* NOTE: Identifiers and keywords are assumed to be separated by whitespace, as
+         is standard. So, `importabc` is parsed as a single token, not `import`
+         followed by `abc`.
+         
+         In addition, inline whitespace (space and tabs) do not have any
+         significance other than seperating tokens. Therefore, all tokens may
+         optionally be separated by inline whitespace. *)
+
+(* Whitespace and Comments *)
+LineBreak = "\n" | "\r\n" ;  (* Each line break is a separate token *)
+Comment = "#", { Any character except LineBreak }, LineBreak ;
+EndOfLine = { LineBreak | Comment | ? end of file ? } ;
+OptEndOfLine = [ EndOfLine ] ;
+
+(* Top Level Structure *)
+(* Design files (`.one`) must begin with `DesignTargetDecl`. *)
+Model = [ EndOfLine ], [ Note ], { Declaration } { Section } ;
+Declaration = DesignTargetDecl | ImportDecl | ApplyDecl | SubmodelDecl | DesignBodyParameterDecl | ParameterDecl | TestDecl ;
+
+(* Declares that this file parameterizes another model; path may include directory prefixes *)
+DesignTargetDecl = "design", [ DirectoryPath ], Identifier, EndOfLine ;
+
+(* Applies a design file to a reference path in the current model. *)
+(* Nested applies (inside `[ … ]`) omit the `apply` keyword. *)
+ApplyDecl = "apply", [ DirectoryPath ], Identifier, "to",
+            Identifier, { ".", Identifier },
+            [ "[", { ApplyBody, EndOfLine }, "]" ], EndOfLine ;
+ApplyBody = [ DirectoryPath ], Identifier, "to", Identifier, { ".", Identifier },
+            [ "[", { ApplyBody, EndOfLine }, "]" ] ;
+
+(* Parameter assignment in a design file; supports `param.instance = value` for nested scopes *)
+(* `$` and `*`/`**` only apply to new parameters (additions); they are ignored on overrides *)
+(* `[Limits]` on overrides replaces the target parameter's limits when present *)
+(* Shorthand form: `id[.instance] = value`; Full form: `Label [Limits]: [{RenderName}] id = value` *)
+DesignBodyParameterDecl = [ Performance ], [ Trace ], ( DesignParamShorthand | ParameterDeclBody ), EndOfLine, [ Note ] ;
+DesignParamTarget = Identifier, [ ".", Identifier ] ;
+DesignParamShorthand = DesignParamTarget, [ Limits ], AssignmentTail ;
+
+(* Notes *)
+Note = SingleLineNote | MultiLineNote ;
+SingleLineNote = "~", { Any character except LineBreak }, LineBreak ;
+MultiLineNote = MultiLineNoteDelimiter, { NoteLine }, MultiLineNoteDelimiter ;
+MultiLineNoteDelimiter = "~~~", "~"*, LineBreak ;
+NoteLine = { Any character except LineBreak or MultiLineNoteDelimiter }, LineBreak ; (* can contain anything except the multi-note delimiter*)
+
+(* Note content is Markdown with embedded LaTeX math ($...$ and $$...$$). This is not parsed / used in Rust, but is the syntax expected for the renderer     *)
+(* Parameter interpolation is also supported using double-brace syntax:         *)
+(*   {{identifier:equation}}  — renders the parameter's expression as KaTeX     *)
+(*   {{identifier:value}}     — renders the parameter's evaluated numeric value  *)
+NoteInterpolation = "{{", Identifier, ":", ( "equation" | "value" ), "}}" ;
+
+(* Sections *)
+Section = "section", Label, EndOfLine, [ Note ], { ImportDecl | ApplyDecl | SubmodelDecl | DesignBodyParameterDecl | ParameterDecl | TestDecl } ;
+
+(* Imports *)
+ImportDecl = "import", Identifier, EndOfLine ;
+(* `submodel` imports the model both as a reference and as a submodel; *)
+(* `reference` imports it as a reference only. *)
+SubmodelDecl = ("submodel" | "reference"), [ DirectoryPath ], ModelInfo, [ SubmodelList ], EndOfLine ;
+DirectoryPath = DirectoryName, "/", { DirectoryName, "/" } ;
+DirectoryName = Identifier | ".." | "." ;
+ModelInfo = Identifier, [ AsAlias ] ;
+AsAlias = "as", Identifier ;
+(* Note the optional trailing comma - this makes git diffs easier to read *)
+SubmodelList = ModelInfo | "[", [ SubmodelListInner ], OptEndOfLine, "]" ;
+SubmodelListInner = OptEndOfLine, ModelInfo, { ",", OptEndOfLine, ModelInfo }, [ "," ] ;
+
+(* Parameters *)
+ParameterDecl = [ Performance ], [ Trace ], ParameterDeclBody, EndOfLine, [ Note ] ;
+ParameterDeclBody = Name, [ Limits ], ":", [ RenderName ], Assignment ;
+Performance = "$" ;
+Trace = "*" | "**" ;
+Name = Label ;
+Limits = ContinuousLimits | DiscreteLimits ;
+ContinuousLimits = "(", Expr, ",", Expr, ")" ;
+DiscreteLimits = "[", Expr, { ",", Expr }, "]" ;
+(* Optional LaTeX render-name for the parameter symbol, e.g. `{\hat{v}}` *)
+RenderName = "{", { Any character except "}" or "{" | "{", RenderNameInner, "}" }, "}" ;
+RenderNameInner = { Any character except "}" or "{" | "{", RenderNameInner, "}" } ;
+AssignmentTail = "=", ( Expr [ ":", UnitExpr ] | PiecewiseExpr ) ;
+Assignment = Identifier, AssignmentTail ;
+
+(* Tests *)
+TestDecl = [ Trace ], "test", ":", Expr, EndOfLine ;
+
+(* Expressions *)
+(* Expression Precedence (highest to lowest):
+   1. Parentheses, function calls
+   2. Unary minus (-)
+   3. Exponentiation ( ** ) - right associative
+   4. Multiplication, division, floor division, modulo (*, /, //, %) - left associative
+   5. Addition, subtraction (+, -) - left associative
+   6. Min/max (|) - non-associative
+   6. Comparisons (<, >, <=, >=, ==, !=) - non-associative, can be chained
+   7. NOT - unary prefix
+   8. AND - left associative
+   9. OR - left associative
+   10. Fallback (?) - left associative
+*)
+Expr = FallbackExpr ;
+FallbackExpr = [ FallbackExpr, "?", ], OrExpr ;
+OrExpr = [ OrExpr, "or", ], AndExpr ;
+AndExpr = [ AndExpr, "and", ], NotExpr ;
+NotExpr = [ "not", ], NotExpr | ComparisonExpr ;
+ComparisonExpr = AdditiveExpr, { ComparisonOp, AdditiveExpr } ;
+ComparisonOp = "<" | ">" | "<=" | ">=" | "==" | "!=" ;
+AdditiveExpr = [ AdditiveExpr, AdditiveOp, ], MultiplicativeExpr ;
+AdditiveOp = "+" | "-" | "--" ;
+MultiplicativeExpr = [ MultiplicativeExpr, MultiplicativeOp, ], ExponentialExpr ;
+MultiplicativeOp = "*" | "/" | "//" | "%" ;
+ExponentialExpr = NegExpr, [ "^", ExponentialExpr ] ;  (* right associative *)
+NegExpr = ( "-", NegExpr ) | PrimaryExpr ;
+PrimaryExpr = NumberLiteral | StringLiteral | BooleanLiteral | Identifier [ ".", Identifier ] | FunctionCall | UnitCast | ( "(", Expr, ")" ) ;
+
+PiecewiseExpr = PiecewisePart, [ ":", UnitExpr ], { EndOfLine, PiecewisePart } ;
+PiecewisePart = "{", Expr, "if", Expr ;
+
+(* Function Calls *)
+FunctionCall = Identifier, "(", [ Expr, { ",", Expr } ], ")" ;
+
+(* Unit Casting *)
+UnitCast = "(", Expr, ":", UnitExpr ")" ;
+
+(* Units *)
+UnitExpr = [ UnitExpr, ( "*" | "/" ) ], UnitTerm ;
+UnitTerm = UnitIdentifier, [ "^", Number ] | UnitOne | ParenthesizedUnitExpr ;
+UnitOne = "1" ; (* represents a unitless 1, usually used for units like 1/s *)
+ParenthesizedUnitExpr = "(", UnitExpr, ")" ;
+
+(* Basic Elements *)
+Identifier = Letter, { Letter | Digit | "_" } ;
+UnitIdentifier = Identifier, [ "$" ] | "$" | "%" ; (* A unit identifier may optionally be terminated by a dollar sign or may be a percent sign *)
+(* note: labels are context sensitive since they can contain spaces and tabs *)
+Label = LabelStartLetter, { LabelLetter }, { { " " | "\t" } LabelLetter { LabelLetter } } ;
+LabelStartLetter = Any character except ( "(" | ")" | "[" | "]" | "{" | "#" | "~" | ":" | "=" | " " | "\t" | "\n" | "*" | "$" );
+LabelLetter = Any character except ( "(" | ")" | "[" | "]" | ":" | "=" | " " | "\t" | "\n" );
+NumberLiteral = [ Sign ], ( NumberPart, [ ExponentPart ] | "inf" ) ;
+NumberPart = DigitSequence, [ ".", DigitSequence ] | ".", DigitSequence ;
+DigitSequence = Digit, { Digit } ;
+ExponentPart = ( "e" | "E" ), [ Sign ], DigitSequence ;
+Sign = "+" | "-" ;
+Letter = "A" | ... | "Z" | "a" | ... | "z" ;
+Digit = "0" | "1" | ... | "9" ;
+StringLiteral = "'", { Any character except LineBreak or "'" }, "'", ;
+BooleanLiteral = "true" | "false" ;

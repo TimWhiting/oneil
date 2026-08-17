@@ -1,66 +1,175 @@
 @echo off
+setlocal EnableExtensions
 
-REM Get the directory of the script
-SET "SCRIPT_DIR=%~dp0"
+rem Directory containing this script (trailing backslash)
+set "SCRIPT_DIR=%~dp0"
+set "WITH_PYTHON_COMPILER=0"
+set "EDITABLE=0"
 
-REM Initialize variables
-SET "EDITABLE=false"
+:arg_loop
+if "%~1"=="" goto arg_done
+if /i "%~1"=="--with-python-compiler" (
+  set "WITH_PYTHON_COMPILER=1"
+  shift
+  goto arg_loop
+)
+if /i "%~1"=="--with-python-package" (
+  set "WITH_PYTHON_COMPILER=1"
+  shift
+  goto arg_loop
+)
+if /i "%~1"=="--no-python" (
+  echo Note: --no-python skips the pip Python library; the CLI still includes python-lib. 1>&2
+  shift
+  goto arg_loop
+)
+if /i "%~1"=="-e" (
+  set "EDITABLE=1"
+  shift
+  goto arg_loop
+)
+if /i "%~1"=="--editable" (
+  set "EDITABLE=1"
+  shift
+  goto arg_loop
+)
+if /i "%~1"=="-h" goto show_help
+if /i "%~1"=="--help" goto show_help
+echo Unknown option: %~1 1>&2
+call :usage 1>&2
+exit /b 1
 
-REM Parse options
-FOR %%A IN (%*) DO (
-    IF "%%A"=="-e" (
-        SET "EDITABLE=true"
-    )
+:show_help
+call :usage
+exit /b 0
+
+:arg_done
+if "%EDITABLE%"=="1" if not "%WITH_PYTHON_COMPILER%"=="1" (
+  echo Note: --editable only applies with --with-python-package. 1>&2
 )
 
-REM Install dependencies using absolute paths
-IF EXIST "%SCRIPT_DIR%src\oneil\requirements.txt" (
-    pip install -r "%SCRIPT_DIR%src\oneil\requirements.txt"
-) ELSE (
-    ECHO ERROR: requirements.txt not found at "%SCRIPT_DIR%src\oneil\requirements.txt"
-    EXIT /B 1
+where cargo >nul 2>&1
+if errorlevel 1 (
+  echo Error: Cargo was not found on your PATH. 1>&2
+  echo. 1>&2
+  echo Install the Rust toolchain with rustup: 1>&2
+  echo   https://rustup.rs/ 1>&2
+  echo. 1>&2
+  echo Download and run rustup-init.exe from the site above. 1>&2
+  echo. 1>&2
+  echo Then restart this terminal, or ensure %%USERPROFILE%%\.cargo\bin is on your PATH. 1>&2
+  exit /b 1
 )
 
-REM Install package
-IF "%EDITABLE%"=="true" (
-    pip install -e "%SCRIPT_DIR%"
-) ELSE (
-    pip install %SCRIPT_DIR%
+call :require_c_toolchain
+if errorlevel 1 exit /b 1
+
+set "ONEIL_PKG=%SCRIPT_DIR%src\oneil"
+if not exist "%ONEIL_PKG%\Cargo.toml" (
+  echo Error: expected Cargo.toml at "%ONEIL_PKG%" 1>&2
+  exit /b 1
 )
 
-REM Check if Vim is installed
-where vim >nul 2>&1
-IF ERRORLEVEL 1 (
-    ECHO Vim not found, installing...
-    choco install vim -y
-) ELSE (
-    ECHO Vim is already installed.
+set "PYTHON_CMD="
+where uv >nul 2>&1
+if not errorlevel 1 (
+  for /f "usebackq delims=" %%P in (`uv python find 3.12 2^>nul`) do set "PYTHON_CMD=%%P"
+)
+if not defined PYTHON_CMD (
+  where python3 >nul 2>&1
+  if not errorlevel 1 set "PYTHON_CMD=python3"
+)
+if not defined PYTHON_CMD (
+  where python >nul 2>&1
+  if not errorlevel 1 set "PYTHON_CMD=python"
+)
+if not defined PYTHON_CMD (
+  echo Error: Python 3.12 was not found ^(needed to link the Rust CLI's model Python support^). 1>&2
+  echo. 1>&2
+  echo Install it with: uv python install 3.12 1>&2
+  exit /b 1
 )
 
-REM Set up Vim syntax highlighting
-SET "VIM_DIR=%USERPROFILE%\vimfiles"
-SET "VIM_SYNTAX_DIR=%VIM_DIR%\syntax"
-SET "VIM_FTDETECT_DIR=%VIM_DIR%\ftdetect"
-SET "ONEIL_VIM_DIR=%SCRIPT_DIR%vim"
+set "PYO3_PYTHON=%PYTHON_CMD%"
 
-REM Create Vim directories if they do not exist
-IF NOT EXIST "%VIM_DIR%" mkdir "%VIM_DIR%"
-IF NOT EXIST "%VIM_SYNTAX_DIR%" mkdir "%VIM_SYNTAX_DIR%"
-IF NOT EXIST "%VIM_FTDETECT_DIR%" mkdir "%VIM_FTDETECT_DIR%"
-
-REM Copy syntax and ftdetect files
-IF EXIST "%ONEIL_VIM_DIR%\syntax\oneil.vim" (
-    copy /Y "%ONEIL_VIM_DIR%\syntax\oneil.vim" "%VIM_SYNTAX_DIR%\oneil.vim"
-) ELSE (
-    ECHO ERROR: Syntax file not found at "%ONEIL_VIM_DIR%\syntax\oneil.vim"
-    EXIT /B 1
+%PYTHON_CMD% -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
+if errorlevel 1 (
+  for /f "usebackq delims=" %%V in (`%PYTHON_CMD% --version 2^>^&1`) do echo Error: Oneil supports Python 3.12. Found: %%V 1>&2
+  echo Install 3.12 with: uv python install 3.12 1>&2
+  exit /b 1
 )
 
-IF EXIST "%ONEIL_VIM_DIR%\ftdetect\oneil.vim" (
-    copy /Y "%ONEIL_VIM_DIR%\ftdetect\oneil.vim" "%VIM_FTDETECT_DIR%\oneil.vim"
-) ELSE (
-    ECHO ERROR: File detection file not found at "%ONEIL_VIM_DIR%\ftdetect\oneil.vim"
-    EXIT /B 1
+%PYTHON_CMD% -c "import os, sys, sysconfig; inc=sysconfig.get_path('include'); sys.exit(0 if os.path.isfile(os.path.join(inc, 'Python.h')) else 1)" >nul 2>&1
+if errorlevel 1 (
+  echo Error: Python development headers were not found ^(Python.h is missing^). 1>&2
+  echo. 1>&2
+  echo The Rust CLI links against Python so models can import .py files. 1>&2
+  echo. 1>&2
+  echo On Windows, use the python.org installer and enable optional features, or install matching 1>&2
+  echo debug/header packages for your Python distribution, then re-run this script. 1>&2
+  exit /b 1
 )
 
-ECHO Vim syntax highlighting setup completed.
+if "%WITH_PYTHON_COMPILER%"=="1" if not exist "%SCRIPT_DIR%pyproject.toml" (
+  echo Error: pyproject.toml not found at "%SCRIPT_DIR%" 1>&2
+  exit /b 1
+)
+
+echo Installing Rust Oneil CLI ^(default features: rust-lib + python-lib^)...
+cargo install --force --path "%ONEIL_PKG%"
+if errorlevel 1 exit /b 1
+
+if not "%WITH_PYTHON_COMPILER%"=="1" goto finish
+
+echo Installing Python library ^(import oneil^)...
+pushd "%SCRIPT_DIR%"
+if "%EDITABLE%"=="1" (
+  %PYTHON_CMD% -m pip install -e .
+) else (
+  %PYTHON_CMD% -m pip install .
+)
+if errorlevel 1 (
+  popd
+  exit /b 1
+)
+popd
+
+:finish
+echo.
+echo Done.
+echo Ensure %%USERPROFILE%%\.cargo\bin is on your PATH to run: oneil --version
+exit /b 0
+
+:require_c_toolchain
+where gcc >nul 2>&1
+if not errorlevel 1 exit /b 0
+rustc -vV 2>nul | findstr /i /c:"windows-msvc" >nul
+if not errorlevel 1 exit /b 0
+echo Error: gcc was not found on your PATH. 1>&2
+echo. 1>&2
+echo A C compiler is required to build Oneil ^(Rust linking and native extensions^). 1>&2
+echo. 1>&2
+echo Install one of: 1>&2
+echo   - MSYS2/MinGW-w64: https://www.msys2.org/ ^(e.g. pacman -S mingw-w64-ucrt-x86_64-gcc^) 1>&2
+echo   - Visual Studio Build Tools with the "Desktop development with C++" workload ^(MSVC^); 1>&2
+echo     use the MSVC Rust target ^(default rustup on Windows^) so Cargo can link without gcc. 1>&2
+exit /b 1
+
+:usage
+echo Usage: install.bat [options]
+echo.
+echo   Builds and installs the Rust Oneil CLI with Cargo ^(rust-lib + python-lib^).
+echo   That build links PyO3 so models can import ordinary .py files and helper
+echo   modules can import oneil.
+echo.
+echo Options:
+echo   --with-python-package   Also install the Python library via pip.
+echo   -e, --editable          With --with-python-package, install it editable.
+echo   -h, --help              Show this help.
+echo.
+echo Prerequisites:
+echo   - Cargo ^(Rust^): https://rustup.rs/
+echo   - gcc ^(or MSVC with the windows-msvc Rust target; see error text if checks fail^)
+echo   - Python 3.12 development headers ^(uv python install 3.12^)
+echo   - For --with-python-package: Python 3.12 with pip
+goto :eof

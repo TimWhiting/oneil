@@ -1,0 +1,38 @@
+name: "Install Oneil"
+description: "Install the Oneil CLI from a GitHub Release onto PATH"
+author: "careweather"
+branding:
+  icon: "download"
+  color: "blue"
+
+inputs:
+  version:
+    description: >-
+      Oneil release tag to install (e.g. v1.0.0). Must match a published
+      GitHub Release that includes CLI archives.
+    required: true
+  github-token:
+    description: >-
+      Optional token for downloading release assets (raises API rate limits).
+      Defaults to the job token.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: "The version string reported by `oneil --version` after install."
+    value: ${{ steps.install.outputs.version }}
+  oneil-path:
+    description: "Absolute path to the installed `oneil` binary."
+    value: ${{ steps.install.outputs.oneil-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Oneil CLI
+      id: install
+      shell: bash
+      env:
+        ONEIL_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bash "${GITHUB_ACTION_PATH}/install.sh"

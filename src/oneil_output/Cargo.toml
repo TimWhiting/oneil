@@ -1,0 +1,30 @@
+[package]
+name = "oneil_output"
+description = "Output and value types for the Oneil programming language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[features]
+arbitrary = ["dep:arbitrary"]
+# See `oneil_shared`'s `ts-bindings` feature.
+ts-bindings = ["dep:ts-rs", "oneil_shared/ts-bindings"]
+
+[dependencies]
+oneil_shared = { path = "../oneil_shared" }
+indexmap = { workspace = true }
+serde = { workspace = true }
+arbitrary = { version = "1.4.2", optional = true }
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

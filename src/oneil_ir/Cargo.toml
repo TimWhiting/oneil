@@ -1,0 +1,29 @@
+
+[package]
+name = "oneil_ir"
+description = "Intermediate representation for the Oneil programming language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[features]
+test-helpers = []
+# Derives `ts_rs::TS` on JSON-facing IR types for `packages/ts-interfaces`
+# codegen. See `docs/CODING_STANDARDS.md` (Generated TypeScript Bindings).
+ts-bindings = ["dep:ts-rs", "oneil_shared/ts-bindings"]
+
+[dependencies]
+oneil_shared = { path = "../oneil_shared" }
+oneil_output = { path = "../oneil_output" }
+indexmap = { workspace = true }
+serde = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+
+[lints]
+workspace = true

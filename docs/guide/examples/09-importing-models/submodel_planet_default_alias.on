@@ -1,0 +1,3 @@
+submodel planet
+
+Surface gravity seen: g_l = g.planet :m/s^2

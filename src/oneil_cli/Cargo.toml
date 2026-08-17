@@ -1,0 +1,46 @@
+[package]
+name = "oneil_cli"
+description = "CLI tool for using the Oneil programming language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Enables the `export_ts_interfaces` example, which writes TypeScript
+# bindings for JSON wire formats into `packages/ts-interfaces/src/generated/`.
+# See `docs/CODING_STANDARDS.md` (Generated TypeScript Bindings).
+ts-bindings = [
+    "dep:ts-rs",
+    "oneil_lsp/ts-bindings",
+    "oneil_output/ts-bindings",
+    "oneil_shared/ts-bindings",
+]
+
+[dependencies]
+oneil_analysis = { path = "../oneil_analysis" }
+oneil_frontend = { path = "../oneil_frontend" }
+oneil_lsp = { path = "../oneil_lsp" }
+oneil_output = { path = "../oneil_output" }
+oneil_runtime = { path = "../oneil_runtime" }
+oneil_shared = { path = "../oneil_shared" }
+anstream = "1.0.0"
+clap = { version = "4.5.1", features = ["derive"] }
+indexmap = { workspace = true }
+notify = "8.2.0"
+owo-colors = "4.2.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+
+[[example]]
+name = "export_ts_interfaces"
+required-features = ["ts-bindings"]
+
+[lints]
+workspace = true

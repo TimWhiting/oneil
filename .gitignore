@@ -1,6 +1,8 @@
 __oncache__/
 __pycache__/
-.vscode/
+/.vscode/*
+!/.vscode/launch.json
+!/.vscode/tasks.json
 .venv/
 *.egg-info
 .vim/
@@ -20,3 +22,10 @@ oncmp_config.toml
 # TypeScript / toolchain source maps (do not commit)
 *.js.map
 *.css.map
+
+# VSCode extension package
+*.vsix
+
+# Node (GitHub Action review scripts)
+node_modules/
+/dist

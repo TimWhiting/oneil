@@ -1,0 +1,242 @@
+name: Weekly Quality Review
+
+on:
+  schedule:
+    # Every Monday at 12:00 UTC
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+jobs:
+  write-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      crate: ${{ steps.pick.outputs.crate }}
+      focus: ${{ steps.pick.outputs.focus }}
+      review_path: ${{ steps.review.outputs.path }}
+      session_id: ${{ steps.review.outputs.session_id }}
+      complexity: ${{ steps.classify.outputs.complexity }}
+    steps:
+      # Uses a PAT (not the default GITHUB_TOKEN) so that the branch pushed
+      # and PR opened later in this job trigger normal pull_request-based CI
+      # (rust.yml, rust-pr.yml). Pushes/PRs made with the default
+      # GITHUB_TOKEN are deliberately prevented by GitHub from triggering
+      # other workflows, to avoid recursive runs.
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.WEEKLY_QUALITY_PAT }}
+
+      - name: Install Cursor CLI
+        run: |
+          curl https://cursor.com/install -fsS | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Nothing in this job should have the agent itself run git/gh commands
+      # (branch, commit, push, pr create, issue create) -- that's always done
+      # by this workflow's own scripted steps below, so that the
+      # weekly-quality/ branch name and PR/issue metadata are guaranteed
+      # rather than merely requested via prompt. `deny` takes precedence over
+      # `allow` and is honored even with `--force`/`--yolo`, so this blocks
+      # the agent from running these commands regardless of what a prompt
+      # asks it to do. See https://cursor.com/docs/cli/reference/permissions.
+      - name: Deny git/gh commands for the agent
+        run: |
+          mkdir -p "$HOME/.cursor"
+          cat > "$HOME/.cursor/cli-config.json" <<'EOF'
+          {
+            "version": 1,
+            "permissions": {
+              "deny": ["Shell(git)", "Shell(gh)"]
+            }
+          }
+          EOF
+
+      - name: Pick random crate and focus
+        id: pick
+        run: |
+          readarray -t crates < <(find src -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/Cargo.toml' \; -printf '%f\n' | sort)
+          focuses=(implementation architecture testing)
+
+          crate="${crates[RANDOM % ${#crates[@]}]}"
+          focus="${focuses[RANDOM % ${#focuses[@]}]}"
+
+          echo "crate=$crate" >> "$GITHUB_OUTPUT"
+          echo "focus=$focus" >> "$GITHUB_OUTPUT"
+          echo "Selected crate=$crate focus=$focus"
+
+      - name: Run quality review
+        id: review
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CRATE: ${{ steps.pick.outputs.crate }}
+          FOCUS: ${{ steps.pick.outputs.focus }}
+          REVIEW_PATH: ${{ github.workspace }}/weekly-quality-review.md
+        run: |
+          case "$FOCUS" in
+            implementation)
+              prompt="Review the Rust crate at src/${CRATE}/ with a focus on implementation quality.
+
+          Read the crate thoroughly. Assess correctness, error handling, Rust idioms, clarity, and adherence to docs/CODING_STANDARDS.md where relevant.
+
+          Do not edit any files. Write a concise markdown review with:
+          ### Summary
+          ### Findings
+          ### Notes"
+              ;;
+            architecture)
+              prompt="Review the Rust crate at src/${CRATE}/ with a focus on architecture.
+
+          Read the crate thoroughly. Assess module boundaries, coupling, separation of concerns, API surface, and how it fits the rest of the workspace, including what could be added to docs/CODING_STANDARDS.md to improve quality.
+
+          Do not edit any files. Write a concise markdown review with:
+          ### Summary
+          ### Findings
+          ### Notes"
+              ;;
+            testing)
+              prompt="Review the Rust crate at src/${CRATE}/ with a focus on testing.
+
+          Read the crate thoroughly. Assess unit/integration/snapshot/property test coverage, test design quality, reusable test helpers, simplicity, conciseness, and alignment with docs/CODING_STANDARDS.md testing guidance.
+
+          Do not edit any files. Write a concise markdown review with:
+          ### Summary
+          ### Findings
+          ### Notes"
+              ;;
+            *)
+              echo "Unknown focus: $FOCUS" >&2
+              exit 1
+              ;;
+          esac
+
+          response="$(agent -p --trust --mode ask --output-format json "$prompt")"
+          echo "$response" | jq -r '.result' > "$REVIEW_PATH"
+          session_id="$(echo "$response" | jq -r '.session_id')"
+
+          echo "path=$REVIEW_PATH" >> "$GITHUB_OUTPUT"
+          echo "session_id=$session_id" >> "$GITHUB_OUTPUT"
+          echo "Wrote review to $REVIEW_PATH (session_id=$session_id)"
+
+      - name: Classify recommended changes
+        id: classify
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          SESSION_ID: ${{ steps.review.outputs.session_id }}
+        run: |
+          prompt='Based on your review, are the recommended changes simple or complex?
+
+          Simple means a small, localized fix that can be implemented safely in one PR without large refactors or design decisions.
+          Complex means the changes need discussion, architectural decisions, multi-crate work, or substantial redesign.
+
+          Reply with exactly one word and nothing else: simple or complex'
+
+          response="$(agent -p --resume "$SESSION_ID" --trust --mode ask --output-format json "$prompt")"
+          raw="$(echo "$response" | jq -r '.result' | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+
+          case "$raw" in
+            *complex*) complexity=complex ;;
+            *simple*) complexity=simple ;;
+            *)
+              echo "Could not classify complexity from agent response: $raw" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "complexity=$complexity" >> "$GITHUB_OUTPUT"
+          echo "Classified recommended changes as: $complexity"
+
+      - name: Implement simple fixes and open PR
+        if: steps.classify.outputs.complexity == 'simple'
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          # Same PAT as the checkout step, so `gh pr create` opens the PR as
+          # that account and pull_request CI runs on it normally.
+          GH_TOKEN: ${{ secrets.WEEKLY_QUALITY_PAT }}
+          SESSION_ID: ${{ steps.review.outputs.session_id }}
+          CRATE: ${{ steps.pick.outputs.crate }}
+          FOCUS: ${{ steps.pick.outputs.focus }}
+          BRANCH: weekly-quality/${{ steps.pick.outputs.crate }}-${{ steps.pick.outputs.focus }}
+        run: |
+          set -euo pipefail
+
+          # Attribute commits to the github-actions[bot] identity (gives it
+          # the bot's name/avatar on GitHub). 41898282 is that account's
+          # fixed, publicly documented user ID; `<id>+<login>@users.noreply.github.com`
+          # is GitHub's standard noreply email format for attributing commits
+          # to a bot/user without exposing a real address. This is just
+          # commit author/committer metadata -- it's independent of the
+          # WEEKLY_QUALITY_PAT used below (GH_TOKEN) to authenticate the
+          # actual push/PR creation, which is what determines whether other
+          # workflows get triggered by this PR.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The branch name, commit, push, and PR creation are all handled by
+          # this script rather than the agent, so they're guaranteed rather
+          # than merely requested. The agent's job is limited to editing
+          # files; coding-standards-review.yml relies on the `weekly-quality/`
+          # branch prefix to skip re-reviewing these PRs, so it must be exact.
+          BASE_SHA="$(git rev-parse HEAD)"
+          git checkout -b "$BRANCH"
+
+          edit_prompt="The recommended changes are simple. Implement them now in the current working tree.
+
+          Requirements:
+          - Apply the recommended fixes from your review to the relevant files under src/${CRATE}/.
+          - Run relevant checks if practical (e.g. cargo test -p ${CRATE}, cargo clippy -p ${CRATE}).
+          - Do NOT run any git or gh commands (add, commit, push, checkout, branch, pr create). This workflow handles committing, pushing, and opening the PR itself once you are done.
+          - Leave your edits as uncommitted changes in the working tree."
+
+          agent -p --resume "$SESSION_ID" --force --trust --output-format text "$edit_prompt"
+
+          if [ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" = "$BASE_SHA" ]; then
+            echo "Agent reported 'simple' changes but made no edits; refusing to open an empty PR" >&2
+            exit 1
+          fi
+
+          subject_prompt="Write a single-line git commit subject (imperative mood, at most 72 characters, no trailing period) summarizing the changes you just made. Reply with exactly that line and nothing else."
+          commit_subject="$(agent -p --resume "$SESSION_ID" --trust --mode ask --output-format json "$subject_prompt" | jq -r '.result // empty' | head -n1)"
+          commit_subject="${commit_subject:-Weekly quality fixes for ${CRATE} (${FOCUS})}"
+
+          body_prompt="Write a concise PR description (markdown) summarizing the changes you just made and why, based on your earlier review. Do not include a top-level heading."
+          pr_body="$(agent -p --resume "$SESSION_ID" --trust --mode ask --output-format json "$body_prompt" | jq -r '.result // empty')"
+          pr_body="${pr_body:-Automated fix from the weekly quality review of \`${CRATE}\` (focus: ${FOCUS}).}"
+
+          # The agent can't run git itself (denied above), so it always
+          # leaves changes uncommitted; commit them here. The guard is kept
+          # anyway as defense-in-depth in case that ever changes.
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "$commit_subject"
+          fi
+
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "Weekly quality review: ${CRATE} (${FOCUS})" \
+            --body "$pr_body" \
+            --head "$BRANCH"
+
+      - name: Open issue for complex review
+        if: steps.classify.outputs.complexity == 'complex'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRATE: ${{ steps.pick.outputs.crate }}
+          FOCUS: ${{ steps.pick.outputs.focus }}
+          REVIEW_PATH: ${{ steps.review.outputs.path }}
+        run: |
+          {
+            echo "Weekly quality review for \`${CRATE}\` (focus: **${FOCUS}**)."
+            echo
+            echo "Recommended changes were classified as **complex**, so they need human discussion rather than an automated PR."
+            echo
+            cat "$REVIEW_PATH"
+          } > issue-body.md
+
+          gh issue create \
+            --title "Weekly quality review: ${CRATE} (${FOCUS})" \
+            --body-file issue-body.md

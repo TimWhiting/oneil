@@ -1,0 +1,24 @@
+[package]
+name = "oneil_snapshot_tests"
+description = "Snapshot tests for Oneil evaluation output and errors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+oneil_analysis = { path = "../oneil_analysis" }
+oneil_output = { path = "../oneil_output" }
+oneil_runtime = { path = "../oneil_runtime" }
+oneil_shared = { path = "../oneil_shared" }
+insta = "1.40"
+
+[lints]
+workspace = true

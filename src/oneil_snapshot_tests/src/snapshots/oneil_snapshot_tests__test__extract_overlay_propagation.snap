@@ -1,0 +1,10 @@
+---
+source: src/oneil_snapshot_tests/src/test.rs
+expression: "run_fixture(\"with_overlay_propagation/overlay.one\")"
+---
+Model: fixtures/with_overlay_propagation/parent.on
+Tests: 0/0
+Parameters:
+  direct = 99
+  via_mid = 99
+  doubled_mid = 198

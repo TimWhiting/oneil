@@ -1,0 +1,11 @@
+submodel planet as earth
+submodel planet as mars
+submodel planet as moon
+
+apply mars to mars
+apply moon_gravity to moon
+
+Spacecraft mass: m = 500 :kg
+$ Weight on Earth: W_e = m * g.earth :N
+$ Weight on Mars:  W_m = m * g.mars  :N
+$ Weight on Moon:  W_mo = m * g.moon  :N

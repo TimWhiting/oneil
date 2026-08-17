@@ -1,0 +1,1259 @@
+use std::ops;
+
+use serde::{Deserialize, Serialize};
+
+use crate::util::is_close;
+use oneil_shared::serde::f64 as f64_serde;
+
+// TODO: maybe add more comparison functions for
+//       intervals into the standard library (
+//       such as `contains` or `overlaps`)
+
+// TODO: add note linking arithmetic operations to
+//       documentation in docs folder
+
+// NOTE: it may be worthwhile to take a look at
+//       IEEE 1788-2015 and IEEE 1788.1-2017. They
+//       contain standards for interval arithmetic,
+//       and it might be a selling point for Oneil
+//       to claim that it is compliant with these
+//       standards.
+//
+//       For now, we are just implementing what is
+//       needed so that we can get to a working
+//       implementation.
+
+/// An interval of numbers
+///
+/// An interval is mathematically defined as a
+/// closed and connected set of numbers.
+///
+/// In other words, an interval has a minimum
+/// and maximum value, and all numbers between
+/// the minimum and maximum value are considered
+/// to be part of the interval.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Interval {
+    #[serde(with = "f64_serde")]
+    min: f64,
+    #[serde(with = "f64_serde")]
+    max: f64,
+}
+
+impl Interval {
+    /// Creates a new interval without checking the validity of the interval.
+    #[must_use]
+    pub const fn new_unchecked(min: f64, max: f64) -> Self {
+        let min = if min == 0.0 { 0.0 } else { min };
+        let max = if max == 0.0 { -0.0 } else { max };
+        Self { min, max }
+    }
+
+    /// Creates a new interval
+    ///
+    /// # Panics
+    ///
+    /// Panics if the min or max is NaN, or if the min
+    /// is greater than the max. To create an
+    /// empty interval, use `Interval::empty()`.
+    #[must_use]
+    pub fn new(min: f64, max: f64) -> Self {
+        assert!(!min.is_nan(), "min must not be NaN in ({min:?}, {max:?})");
+        assert!(!max.is_nan(), "max must not be NaN in ({min:?}, {max:?})");
+        assert!(
+            min <= max,
+            "min must be less than or equal to max in ({min:?}, {max:?})"
+        );
+
+        Self::new_unchecked(min, max)
+    }
+
+    /// Creates a new interval with a minimum and maximum of 0.0
+    #[must_use]
+    pub const fn zero() -> Self {
+        Self::new_unchecked(0.0, 0.0)
+    }
+
+    /// Creates a new empty interval
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self::new_unchecked(f64::NAN, f64::NAN)
+    }
+
+    /// Returns the minimum value of the interval
+    #[must_use]
+    pub const fn min(&self) -> f64 {
+        self.min
+    }
+
+    /// Returns the maximum value of the interval
+    #[must_use]
+    pub const fn max(&self) -> f64 {
+        self.max
+    }
+
+    /// Returns true if the interval is empty
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.min.is_nan() && self.max.is_nan()
+    }
+
+    /// Returns true if the interval is valid
+    ///
+    /// An interval is valid if it is empty or
+    /// the minimum is less than or equal to the maximum.
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.is_empty() || self.min <= self.max
+    }
+
+    /// Subtracts two intervals. This does not apply the
+    /// standard rules of interval arithmetic. Instead, it subtracts the minimum
+    /// from the minimum and the maximum from the maximum.
+    #[must_use]
+    pub fn escaped_sub(self, rhs: Self) -> Self {
+        let value_a = self.min - rhs.min;
+        let value_b = self.max - rhs.max;
+
+        let min = f64::min(value_a, value_b);
+        let max = f64::max(value_a, value_b);
+
+        Self { min, max }
+    }
+
+    /// Divides two intervals. This does not apply the
+    /// standard rules of interval arithmetic. Instead, it divides the minimum
+    /// by the minimum and the maximum by the maximum.
+    #[must_use]
+    pub fn escaped_div(self, rhs: Self) -> Self {
+        let value_a = self.min / rhs.min;
+        let value_b = self.max / rhs.max;
+
+        let min = f64::min(value_a, value_b);
+        let max = f64::max(value_a, value_b);
+
+        Self { min, max }
+    }
+
+    /// Exponentiation of intervals
+    ///
+    /// This is defined based on the implementation in the
+    /// [inari crate](https://docs.rs/inari/latest/src/inari/elementary.rs.html#588)
+    #[must_use]
+    pub fn pow(self, exponent: Self) -> Self {
+        const DOMAIN: Interval = Interval::new_unchecked(0.0, f64::INFINITY);
+
+        let base = self.intersection(DOMAIN);
+
+        if base.is_empty() || exponent.is_empty() {
+            return Self::empty();
+        }
+
+        let base_min = base.min;
+        let base_max = base.max;
+        let exp_min = exponent.min;
+        let exp_max = exponent.max;
+
+        if exp_max <= 0.0 {
+            if base_max == 0.0 {
+                Self::empty()
+            } else if base_max < 1.0 {
+                let min = base_max.powf(exp_max);
+                let max = base_min.powf(exp_min);
+                Self::new(min, max)
+            } else if base_min > 1.0 {
+                let min = base_max.powf(exp_min);
+                let max = base_min.powf(exp_max);
+                Self::new(min, max)
+            } else {
+                let min = base_max.powf(exp_min);
+                let max = base_min.powf(exp_min);
+                Self::new(min, max)
+            }
+        } else if exp_min > 0.0 {
+            if base_max < 1.0 {
+                let min = base_min.powf(exp_max);
+                let max = base_max.powf(exp_min);
+                Self::new(min, max)
+            } else if base_min > 1.0 {
+                let min = base_min.powf(exp_min);
+                let max = base_max.powf(exp_max);
+                Self::new(min, max)
+            } else {
+                let min = base_min.powf(exp_max);
+                let max = base_max.powf(exp_max);
+                Self::new(min, max)
+            }
+        } else if base_max == 0.0 {
+            let min = 0.0;
+            let max = 0.0;
+            Self::new(min, max)
+        } else {
+            let min_min = base_min.powf(exp_min);
+            let min_max = base_min.powf(exp_max);
+            let max_min = base_max.powf(exp_min);
+            let max_max = base_max.powf(exp_max);
+            Self::new(f64::min(min_max, max_min), f64::max(min_min, max_max))
+        }
+    }
+
+    /// Returns the intersection of two intervals
+    ///
+    /// If either interval is empty or the intervals
+    /// do not overlap, the result is an empty interval.
+    ///
+    /// Example
+    ///
+    /// ```oneil-eval-output
+    /// |------- a -------|
+    ///        |-------- b --------|
+    ///        |- result -|
+    /// ```
+    #[must_use]
+    pub fn intersection(self, rhs: Self) -> Self {
+        if self.is_empty() || rhs.is_empty() {
+            return Self::empty();
+        }
+
+        if self.min > rhs.max || rhs.min > self.max {
+            return Self::empty();
+        }
+
+        let min = f64::max(self.min, rhs.min);
+        let max = f64::min(self.max, rhs.max);
+        Self::new(min, max)
+    }
+
+    /// Returns the tightest interval that contains both self and rhs as its subsets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oneil_output::Interval;
+    ///
+    /// let interval1 = Interval::new(1.0, 2.0);
+    /// let interval2 = Interval::new(3.0, 4.0);
+    /// let interval3 = interval1.tightest_enclosing_interval(interval2);
+    ///
+    /// assert_eq!(interval3, Interval::new(1.0, 4.0));
+    /// ```
+    #[must_use]
+    pub fn tightest_enclosing_interval(self, rhs: Self) -> Self {
+        if self.is_empty() {
+            return rhs;
+        }
+
+        if rhs.is_empty() {
+            return self;
+        }
+
+        let min = f64::min(self.min, rhs.min);
+        let max = f64::max(self.max, rhs.max);
+
+        Self::new(min, max)
+    }
+
+    /// Returns true if `self` contains `rhs`.
+    ///
+    /// If `rhs` is empty, then `self` is considered to contain `rhs`.
+    ///
+    /// If `self` is empty, then `self` cannot contain `rhs`.
+    #[must_use]
+    pub fn contains(&self, rhs: &Self) -> bool {
+        if rhs.is_empty() {
+            return true;
+        }
+
+        if self.is_empty() {
+            return false;
+        }
+
+        self.min <= rhs.min && self.max >= rhs.max
+    }
+
+    /// Returns true if `self` is entirely strictly to the left of `rhs`.
+    ///
+    /// That is, every value in `self` is less than every value in `rhs`
+    /// (equivalently, `self.max < rhs.min`). Returns false if either interval is empty.
+    #[must_use]
+    pub fn lt(&self, rhs: &Self) -> bool {
+        !self.is_empty() && !rhs.is_empty() && self.max < rhs.min
+    }
+
+    /// Returns true if `self` is entirely to the left of or touching `rhs`.
+    ///
+    /// That is, `self.max <= rhs.min`. Returns false if either interval is empty.
+    ///
+    /// Note that this must be implemented seperately from `lt` because in this case,
+    /// `a <= b` is not equivalent to `a < b || a == b`. For example, `1 | 2 <= 2 | 2`
+    /// is true, but `1 | 2 < 2 | 2` is false and `1 | 2 == 2 | 2` is false.
+    #[must_use]
+    pub fn lte(&self, rhs: &Self) -> bool {
+        !self.is_empty() && !rhs.is_empty() && self.max <= rhs.min
+    }
+
+    /// Returns true if `self` is entirely strictly to the right of `rhs`.
+    ///
+    /// That is, every value in `self` is greater than every value in `rhs`
+    /// (equivalently, `self.min > rhs.max`). Returns false if either interval is empty.
+    #[must_use]
+    pub fn gt(&self, rhs: &Self) -> bool {
+        !self.is_empty() && !rhs.is_empty() && self.min > rhs.max
+    }
+
+    /// Returns true if `self` is entirely to the right of or touching `rhs`.
+    ///
+    /// That is, `self.min >= rhs.max`. Returns false if either interval is empty.
+    ///
+    /// Note that this must be implemented seperately from `gt` because in this case,
+    /// `a >= b` is not equivalent to `a > b || a == b`. For example, `2 | 2 >= 1 | 2`
+    /// is true, but `2 | 2 > 1 | 2` is false and `2 | 2 == 1 | 2` is false.
+    #[must_use]
+    pub fn gte(&self, rhs: &Self) -> bool {
+        !self.is_empty() && !rhs.is_empty() && self.min >= rhs.max
+    }
+
+    /// Returns the square root of the interval
+    #[must_use]
+    pub fn sqrt(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+
+        if self.max < 0.0 {
+            Self::empty()
+        } else if self.min <= 0.0 {
+            Self::new(0.0, self.max.sqrt())
+        } else {
+            Self::new(self.min.sqrt(), self.max.sqrt())
+        }
+    }
+
+    /// Returns the absolute value of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the absolute value function.
+    #[must_use]
+    pub fn abs(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+
+        if self.min >= 0.0 {
+            self
+        } else if self.max <= 0.0 {
+            Self::new(-self.max, -self.min)
+        } else {
+            Self::new(0.0, f64::max(-self.min, self.max))
+        }
+    }
+
+    /// Returns the sign of the interval: the tightest interval containing
+    /// the possible sign values (-1, 0, or 1).
+    #[must_use]
+    pub fn sign(self) -> Self {
+        match classify(&self) {
+            IntervalClass::Empty => Self::empty(),
+            IntervalClass::Zero => Self::zero(),
+            IntervalClass::Positive1 => Self::new(1.0, 1.0),
+            IntervalClass::Positive0 => Self::new(0.0, 1.0),
+            IntervalClass::Mixed => Self::new(-1.0, 1.0),
+            IntervalClass::Negative0 => Self::new(-1.0, 0.0),
+            IntervalClass::Negative1 => Self::new(-1.0, -1.0),
+        }
+    }
+
+    /// Returns the interval of values rounded down to the nearest integer.
+    #[must_use]
+    pub fn floor(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+        Self::new(self.min.floor(), self.max.floor())
+    }
+
+    /// Returns the interval of values rounded up to the nearest integer.
+    #[must_use]
+    pub fn ceiling(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+        Self::new(self.min.ceil(), self.max.ceil())
+    }
+
+    /// Returns the natural logarithm of the interval
+    ///
+    /// This is defined based on Brendon's reasoning and
+    /// could be incorrect.
+    #[must_use]
+    pub fn ln(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+
+        if self.max <= 0.0 {
+            Self::empty()
+        } else if self.min <= 0.0 {
+            Self::new(f64::NEG_INFINITY, self.max.ln())
+        } else {
+            Self::new(self.min.ln(), self.max.ln())
+        }
+    }
+
+    /// Returns the base 10 logarithm of the interval
+    ///
+    /// This is defined based on Brendon's reasoning and
+    /// could be incorrect.
+    #[must_use]
+    pub fn log10(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+
+        if self.max <= 0.0 {
+            Self::empty()
+        } else if self.min <= 0.0 {
+            Self::new(f64::NEG_INFINITY, self.max.log10())
+        } else {
+            Self::new(self.min.log10(), self.max.log10())
+        }
+    }
+
+    /// Returns the base 2 logarithm of the interval
+    ///
+    /// This is defined based on Brendon's reasoning and
+    /// could be incorrect.
+    #[must_use]
+    pub fn log2(self) -> Self {
+        if self.is_empty() {
+            return Self::empty();
+        }
+
+        if self.max <= 0.0 {
+            Self::empty()
+        } else if self.min <= 0.0 {
+            Self::new(f64::NEG_INFINITY, self.max.log2())
+        } else {
+            Self::new(self.min.log2(), self.max.log2())
+        }
+    }
+
+    /// Returns the sine of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the sine function. The domain of the point function
+    /// is ℝ and the range is \[−1, 1\].
+    ///
+    /// Based on the [inari crate](https://github.com/unageek/inari) implementation.
+    #[must_use]
+    pub fn sin(self) -> Self {
+        if self.is_empty() {
+            return self;
+        }
+
+        let min = self.min;
+        let max = self.max;
+
+        // short circuit for the case where the interval is greater than 2pi
+        //
+        // even though this is technically accounted for below, it appears that
+        // large numbers (for example, `1.0e34`) will cause the calculation to
+        // be incorrect.
+        if (max - min) > 2.0 * std::f64::consts::PI {
+            return Self::new(-1.0, 1.0);
+        }
+
+        let frac_pi_2 = Self::from(std::f64::consts::FRAC_PI_2);
+
+        let step = (self / frac_pi_2).floor();
+        let step_min = step.min;
+        let step_max = step.max;
+
+        #[expect(
+            clippy::float_cmp,
+            reason = "we want to compare the exact values of the floats"
+        )]
+        let step_delta = if min == max { 0.0 } else { step_max - step_min };
+
+        // Quarter-period index: 0, 1, 2, 3
+        let min_step_modulo = step_min.rem_euclid(4.0);
+
+        if (is_close(min_step_modulo, 0.0) && step_delta < 1.0)
+            || (is_close(min_step_modulo, 3.0) && step_delta < 2.0)
+        {
+            // monotonically increasing
+            //
+            // the following would work, except lack of precision can
+            // cause it to produce an invalid interval sometimes...
+            //
+            // Self::new(min.sin(), max.sin())
+
+            let min_sin = min.sin();
+            let max_sin = max.sin();
+
+            Self::new(f64::min(min_sin, max_sin), f64::max(min_sin, max_sin))
+        } else if (is_close(min_step_modulo, 1.0) && step_delta < 2.0)
+            || (is_close(min_step_modulo, 2.0) && step_delta < 1.0)
+        {
+            // monotonically decreasing
+            //
+            // the following would work, except lack of precision can
+            // cause it to produce an invalid interval sometimes...
+            //
+            // Self::new(max.sin(), min.sin())
+
+            let min_sin = min.sin();
+            let max_sin = max.sin();
+
+            Self::new(f64::min(min_sin, max_sin), f64::max(min_sin, max_sin))
+        } else if (is_close(min_step_modulo, 0.0) && step_delta < 3.0)
+            || (is_close(min_step_modulo, 3.0) && step_delta < 4.0)
+        {
+            // increasing, then decreasing
+            Self::new(f64::min(min.sin(), max.sin()), 1.0)
+        } else if (is_close(min_step_modulo, 1.0) && step_delta < 4.0)
+            || (is_close(min_step_modulo, 2.0) && step_delta < 3.0)
+        {
+            // decreasing, then increasing
+            Self::new(-1.0, f64::max(min.sin(), max.sin()))
+        } else {
+            Self::new(-1.0, 1.0)
+        }
+    }
+
+    /// Returns the cosine of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the cosine function. The domain of the point function
+    /// is ℝ and the range is \[−1, 1\].
+    ///
+    /// Based on the [inari crate](https://github.com/unageek/inari) implementation.
+    #[must_use]
+    pub fn cos(self) -> Self {
+        if self.is_empty() {
+            return self;
+        }
+
+        let min = self.min;
+        let max = self.max;
+
+        // short circuit for the case where the interval is greater than 2pi
+        //
+        // even though this is technically accounted for below, it appears that
+        // large numbers (for example, `1.0e34`) will cause the calculation to
+        // be incorrect.
+        if (max - min) > 2.0 * std::f64::consts::PI {
+            return Self::new(-1.0, 1.0);
+        }
+
+        let pi = Self::from(std::f64::consts::PI);
+
+        let step = (self / pi).floor();
+        let step_min = step.min;
+        let step_max = step.max;
+
+        #[expect(
+            clippy::float_cmp,
+            reason = "we want to compare the exact values of the floats"
+        )]
+        let step_delta = if min == max { 0.0 } else { step_max - step_min };
+
+        // Half-period index: 0 or 1 (cos decreases on [0, π], increases on [π, 2π], etc.)
+        let min_step_modulo = step_min.rem_euclid(2.0);
+
+        if is_close(step_delta, 0.0) {
+            if is_close(min_step_modulo, 0.0) {
+                // monotonically decreasing
+                Self::new(max.cos(), min.cos())
+            } else {
+                // monotonically increasing
+                Self::new(min.cos(), max.cos())
+            }
+        } else if is_close(step_delta, 1.0) {
+            if is_close(min_step_modulo, 0.0) {
+                // decreasing, then increasing
+                Self::new(-1.0, f64::max(min.cos(), max.cos()))
+            } else {
+                // increasing, then decreasing
+                Self::new(f64::min(min.cos(), max.cos()), 1.0)
+            }
+        } else {
+            Self::new(-1.0, 1.0)
+        }
+    }
+
+    /// Returns the tangent of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the tangent function, or the entire real line if the
+    /// interval contains a singularity (e.g. π/2 + nπ).
+    ///
+    /// The domain of the point function is ℝ; the range is ℝ.
+    #[must_use]
+    pub fn tan(self) -> Self {
+        if self.is_empty() {
+            return self;
+        }
+
+        let min = self.min;
+        let max = self.max;
+
+        // short circuit for the case where the interval is
+        // greater than or equal to pi
+        //
+        // `tan` cycles every pi, so if the interval is greater
+        // than or equal to pi, the result includes negative and
+        // positive infinity.
+        if (max - min) >= std::f64::consts::PI {
+            return Self::new(f64::NEG_INFINITY, f64::INFINITY);
+        }
+
+        // also short circuit for the case where either interval
+        // is infinite, since that implies that a full `tan` cycle
+        // is included in the interval.
+        if min.is_infinite() || max.is_infinite() {
+            return Self::new(f64::NEG_INFINITY, f64::INFINITY);
+        }
+
+        let min_tan = min.tan();
+        let max_tan = max.tan();
+
+        if min_tan > max_tan {
+            // if the tangent of the minimum is greater than the
+            // tangent of the maximum, the result must pass through
+            // negative infinity and positive infinity.
+            Self::new(f64::NEG_INFINITY, f64::INFINITY)
+        } else {
+            // otherwise, because `tan` increases monotonically,
+            // the result is the interval between the tangent of
+            // the minimum and the tangent of the maximum.
+            Self::new(min_tan, max_tan)
+        }
+    }
+
+    /// Returns the arc sine of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the arc sine function. The domain of the point function
+    /// is \[−1, 1\] and the range is \[−π/2, π/2\].
+    ///
+    /// If the interval does not intersect \[−1, 1\], returns an empty interval.
+    ///
+    /// Based on the [inari crate](https://github.com/unageek/inari) implementation.
+    #[must_use]
+    pub fn asin(self) -> Self {
+        const DOMAIN: Interval = Interval::new_unchecked(-1.0, 1.0);
+
+        let x = self.intersection(DOMAIN);
+
+        if x.is_empty() {
+            return Self::empty();
+        }
+
+        // asin is monotonically increasing
+        Self::new(x.min.asin(), x.max.asin())
+    }
+
+    /// Returns the arc cosine of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the arc cosine function. The domain of the point function
+    /// is \[−1, 1\] and the range is \[0, π\].
+    ///
+    /// If the interval does not intersect \[−1, 1\], returns an empty interval.
+    ///
+    /// Based on the [inari crate](https://github.com/unageek/inari) implementation.
+    #[must_use]
+    pub fn acos(self) -> Self {
+        const DOMAIN: Interval = Interval::new_unchecked(-1.0, 1.0);
+
+        let x = self.intersection(DOMAIN);
+
+        if x.is_empty() {
+            return Self::empty();
+        }
+
+        // acos is monotonically decreasing
+        Self::new(x.max.acos(), x.min.acos())
+    }
+
+    /// Returns the arc tangent of the interval.
+    ///
+    /// The result is the tightest interval containing the image of this
+    /// interval under the arc tangent function. The domain of the point function
+    /// is ℝ and the range is (−π/2, π/2).
+    ///
+    /// Based on the [inari crate](https://github.com/unageek/inari) implementation.
+    #[must_use]
+    pub fn atan(self) -> Self {
+        if self.is_empty() {
+            return self;
+        }
+
+        // atan is monotonically increasing
+        Self::new(self.min.atan(), self.max.atan())
+    }
+}
+
+impl From<f64> for Interval {
+    /// Converts an `f64` to an interval with the same value for the minimum and maximum.
+    fn from(value: f64) -> Self {
+        Self::new(value, value)
+    }
+}
+
+impl From<&f64> for Interval {
+    /// Converts a `&f64` to an interval with the same value for the minimum and maximum.
+    fn from(value: &f64) -> Self {
+        Self::from(*value)
+    }
+}
+
+impl PartialEq for Interval {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_empty() && other.is_empty()
+            || is_close(self.min, other.min) && is_close(self.max, other.max)
+    }
+}
+
+impl ops::Neg for Interval {
+    type Output = Self;
+
+    /// Negation of intervals
+    ///
+    /// This is defined according to the research in the
+    /// [interval arithmetic paper](/docs/research/2025-11-13-interval-arithmetic-paper-review.md).
+    fn neg(self) -> Self::Output {
+        Self {
+            min: -self.max,
+            max: -self.min,
+        }
+    }
+}
+
+impl ops::Add for Interval {
+    type Output = Self;
+
+    /// Addition of intervals
+    ///
+    /// This is defined according to the research in the
+    /// [interval arithmetic paper](/docs/research/2025-11-13-interval-arithmetic-paper-review.md).
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            min: self.min + rhs.min,
+            max: self.max + rhs.max,
+        }
+    }
+}
+
+impl ops::Sub for Interval {
+    type Output = Self;
+
+    /// Subtraction of intervals
+    ///
+    /// This is defined according to the research in the
+    /// [interval arithmetic paper](/docs/research/2025-11-13-interval-arithmetic-paper-review.md).
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            min: self.min - rhs.max,
+            max: self.max - rhs.min,
+        }
+    }
+}
+
+impl ops::Mul for Interval {
+    type Output = Self;
+
+    /// Multiplication of intervals
+    ///
+    /// This is defined according to the research in the
+    /// [interval arithmetic paper](/docs/research/2025-11-13-interval-arithmetic-paper-review.md).
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the different cases should remain distinct so that they can easily be checked against the table in the documentation"
+    )]
+    fn mul(self, rhs: Self) -> Self::Output {
+        let lhs = self;
+
+        let lhs_class = classify(&lhs);
+        let rhs_class = classify(&rhs);
+
+        match (lhs_class, rhs_class) {
+            (IntervalClass::Empty, _) | (_, IntervalClass::Empty) => Self::empty(),
+            (
+                IntervalClass::Positive1
+                | IntervalClass::Positive0
+                | IntervalClass::Mixed
+                | IntervalClass::Negative0
+                | IntervalClass::Negative1
+                | IntervalClass::Zero,
+                IntervalClass::Zero,
+            ) => Self::zero(),
+            (
+                IntervalClass::Zero,
+                IntervalClass::Positive1
+                | IntervalClass::Positive0
+                | IntervalClass::Mixed
+                | IntervalClass::Negative0
+                | IntervalClass::Negative1,
+            ) => Self::zero(),
+            (
+                IntervalClass::Positive1 | IntervalClass::Positive0,
+                IntervalClass::Positive1 | IntervalClass::Positive0,
+            ) => {
+                let min = lhs.min * rhs.min;
+                let max = lhs.max * rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive1 | IntervalClass::Positive0, IntervalClass::Mixed) => {
+                let min = lhs.max * rhs.min;
+                let max = lhs.max * rhs.max;
+                Self::new(min, max)
+            }
+            (
+                IntervalClass::Positive1 | IntervalClass::Positive0,
+                IntervalClass::Negative1 | IntervalClass::Negative0,
+            ) => {
+                let min = lhs.max * rhs.min;
+                let max = lhs.min * rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Positive1 | IntervalClass::Positive0) => {
+                let min = lhs.min * rhs.max;
+                let max = lhs.max * rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Mixed) => {
+                let min = f64::min(lhs.min * rhs.max, lhs.max * rhs.min);
+                let max = f64::max(lhs.min * rhs.min, lhs.max * rhs.max);
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Negative1 | IntervalClass::Negative0) => {
+                let min = lhs.max * rhs.min;
+                let max = lhs.min * rhs.min;
+                Self::new(min, max)
+            }
+            (
+                IntervalClass::Negative1 | IntervalClass::Negative0,
+                IntervalClass::Positive1 | IntervalClass::Positive0,
+            ) => {
+                let min = lhs.min * rhs.max;
+                let max = lhs.max * rhs.min;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative1 | IntervalClass::Negative0, IntervalClass::Mixed) => {
+                let min = lhs.min * rhs.max;
+                let max = lhs.min * rhs.min;
+                Self::new(min, max)
+            }
+            (
+                IntervalClass::Negative0 | IntervalClass::Negative1,
+                IntervalClass::Negative1 | IntervalClass::Negative0,
+            ) => {
+                let min = lhs.max * rhs.max;
+                let max = lhs.min * rhs.min;
+                Self::new(min, max)
+            }
+        }
+    }
+}
+
+impl ops::Div for Interval {
+    type Output = Self;
+
+    /// Division of intervals
+    ///
+    /// This is defined according to the research in the
+    /// [interval arithmetic paper](/docs/research/2025-11-13-interval-arithmetic-paper-review.md).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the implementation is an implementation of a table, which is long but straightforward"
+    )]
+    #[expect(
+        clippy::match_same_arms,
+        reason = "the different cases should remain distinct so that they can easily be checked against the table in the documentation"
+    )]
+    fn div(self, rhs: Self) -> Self::Output {
+        let lhs = self;
+
+        let lhs_class = classify(&lhs);
+        let rhs_class = classify(&rhs);
+
+        match (lhs_class, rhs_class) {
+            (IntervalClass::Empty, _) | (_, IntervalClass::Empty) => Self::empty(),
+            (
+                IntervalClass::Positive1
+                | IntervalClass::Positive0
+                | IntervalClass::Mixed
+                | IntervalClass::Negative0
+                | IntervalClass::Negative1
+                | IntervalClass::Zero,
+                IntervalClass::Zero,
+            ) => Self::empty(),
+            (
+                IntervalClass::Zero,
+                IntervalClass::Positive1
+                | IntervalClass::Positive0
+                | IntervalClass::Mixed
+                | IntervalClass::Negative0
+                | IntervalClass::Negative1,
+            ) => {
+                let min = 0.0;
+                let max = 0.0;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive1, IntervalClass::Positive1) => {
+                let min = lhs.min / rhs.max;
+                let max = lhs.max / rhs.min;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive1, IntervalClass::Positive0) => {
+                let min = lhs.min / rhs.max;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive0, IntervalClass::Positive1) => {
+                let min = 0.0;
+                let max = lhs.max / rhs.min;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive0, IntervalClass::Positive0) => {
+                let min = 0.0;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Positive1) => {
+                let min = lhs.min / rhs.min;
+                let max = lhs.max / rhs.min;
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Positive0) => {
+                let min = f64::NEG_INFINITY;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative0, IntervalClass::Positive1) => {
+                let min = lhs.min / rhs.min;
+                let max = 0.0;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative0, IntervalClass::Positive0) => {
+                let min = f64::NEG_INFINITY;
+                let max = 0.0;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative1, IntervalClass::Positive1) => {
+                let min = lhs.min / rhs.min;
+                let max = lhs.max / rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative1, IntervalClass::Positive0) => {
+                let min = f64::NEG_INFINITY;
+                let max = lhs.max / rhs.max;
+                Self::new(min, max)
+            }
+            (
+                IntervalClass::Positive1
+                | IntervalClass::Positive0
+                | IntervalClass::Mixed
+                | IntervalClass::Negative0
+                | IntervalClass::Negative1,
+                IntervalClass::Mixed,
+            ) => {
+                let min = f64::NEG_INFINITY;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive1, IntervalClass::Negative1) => {
+                let min = lhs.max / rhs.max;
+                let max = lhs.min / rhs.min;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive1, IntervalClass::Negative0) => {
+                let min = f64::NEG_INFINITY;
+                let max = lhs.min / rhs.min;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive0, IntervalClass::Negative1) => {
+                let min = lhs.max / rhs.max;
+                let max = 0.0;
+                Self::new(min, max)
+            }
+            (IntervalClass::Positive0, IntervalClass::Negative0) => {
+                let min = f64::NEG_INFINITY;
+                let max = 0.0;
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Negative1) => {
+                let min = lhs.max / rhs.max;
+                let max = lhs.min / rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Mixed, IntervalClass::Negative0) => {
+                let min = f64::NEG_INFINITY;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative0, IntervalClass::Negative1) => {
+                let min = 0.0;
+                let max = lhs.min / rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative0, IntervalClass::Negative0) => {
+                let min = 0.0;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative1, IntervalClass::Negative1) => {
+                let min = lhs.max / rhs.min;
+                let max = lhs.min / rhs.max;
+                Self::new(min, max)
+            }
+            (IntervalClass::Negative1, IntervalClass::Negative0) => {
+                let min = lhs.max / rhs.min;
+                let max = f64::INFINITY;
+                Self::new(min, max)
+            }
+        }
+    }
+}
+
+impl ops::Rem for Interval {
+    type Output = Self;
+
+    /// Modulo an interval
+    ///
+    /// This is defined by Brendon's reasoning and therefore
+    /// may have incorrect behavior
+    fn rem(self, rhs: Self) -> Self::Output {
+        let lhs = self;
+
+        if rhs.is_empty() {
+            return Self::empty();
+        }
+
+        let abs_rhs = Self::new(
+            f64::min(rhs.min.abs(), rhs.max.abs()),
+            f64::max(rhs.min.abs(), rhs.max.abs()),
+        );
+
+        let rhs_includes_zero = rhs.min <= 0.0 && rhs.max >= 0.0;
+
+        match classify(&lhs) {
+            IntervalClass::Empty => Self::empty(),
+            IntervalClass::Zero => Self::zero(),
+            IntervalClass::Positive0 | IntervalClass::Positive1 => {
+                if lhs.max < abs_rhs.min {
+                    if rhs_includes_zero {
+                        let min = 0.0;
+                        let max = lhs.max;
+                        Self::new(min, max)
+                    } else {
+                        lhs
+                    }
+                } else {
+                    let min = 0.0;
+                    let max = abs_rhs.max;
+                    Self::new(min, max)
+                }
+            }
+            IntervalClass::Mixed => {
+                let max = if lhs.max < abs_rhs.min {
+                    lhs.max
+                } else {
+                    abs_rhs.max
+                };
+
+                let min = if lhs.min > -abs_rhs.min {
+                    lhs.min
+                } else {
+                    -abs_rhs.max
+                };
+
+                Self::new(min, max)
+            }
+            IntervalClass::Negative0 | IntervalClass::Negative1 => {
+                if lhs.min > -abs_rhs.min {
+                    if rhs_includes_zero {
+                        let min = lhs.min;
+                        let max = 0.0;
+                        Self::new(min, max)
+                    } else {
+                        lhs
+                    }
+                } else {
+                    let min = -abs_rhs.max;
+                    let max = 0.0;
+                    Self::new(min, max)
+                }
+            }
+        }
+    }
+}
+
+impl ops::Rem<f64> for Interval {
+    type Output = Self;
+
+    /// Modulo an interval by a scalar
+    ///
+    /// This is a more specialized version of the modulo operation
+    /// that uses the fact that the modulo is scalar to provide a
+    /// more tight interval.
+    ///
+    /// This is defined by Brendon's reasoning and therefore
+    /// may have incorrect behavior
+    fn rem(self, rhs: f64) -> Self::Output {
+        let lhs = self;
+
+        if rhs.is_nan() {
+            return Self::empty();
+        }
+
+        if rhs == 0.0 {
+            return Self::empty();
+        }
+
+        let rhs = rhs.abs();
+
+        let lhs_distance = lhs.max - lhs.min;
+        let lhs_min_mod = lhs.min % rhs;
+        let lhs_max_mod = lhs.max % rhs;
+
+        match classify(&lhs) {
+            IntervalClass::Empty => Self::empty(),
+            IntervalClass::Zero => Self::zero(),
+            IntervalClass::Positive0 | IntervalClass::Positive1 => {
+                if lhs_distance < rhs && lhs_min_mod <= lhs_max_mod {
+                    Self::new(lhs_min_mod, lhs_max_mod)
+                } else {
+                    Self::new(0.0, rhs)
+                }
+            }
+            IntervalClass::Mixed => {
+                let max = if lhs.max < rhs { lhs.max } else { rhs };
+
+                let min = if lhs.min > -rhs { lhs.min } else { -rhs };
+
+                Self::new(min, max)
+            }
+            IntervalClass::Negative0 | IntervalClass::Negative1 => {
+                if lhs_distance < rhs && lhs_min_mod <= lhs_max_mod {
+                    Self::new(lhs_min_mod, lhs_max_mod)
+                } else {
+                    Self::new(-rhs, 0.0)
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Result, Unstructured};
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Interval {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        let f = u.arbitrary::<f64>()?;
+        let g = u.arbitrary::<f64>()?;
+
+        if f.is_nan() || g.is_nan() {
+            return Ok(Self::empty());
+        }
+
+        let min = f64::min(f, g);
+        let max = f64::max(f, g);
+        Ok(Self::new_unchecked(min, max))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntervalClass {
+    /// An empty interval (represented by both fields as `NaN`)
+    Empty,
+    /// min > 0
+    Positive1,
+    /// min = 0 and max > 0
+    Positive0,
+    /// min = max = 0
+    Zero,
+    /// min < 0 < max
+    Mixed,
+    /// min < 0 and max = 0
+    Negative0,
+    /// max < 0
+    Negative1,
+}
+
+fn classify(interval: &Interval) -> IntervalClass {
+    if interval.is_empty() {
+        IntervalClass::Empty
+    } else if interval.min > 0.0 {
+        IntervalClass::Positive1
+    } else if interval.min == 0.0 && interval.max > 0.0 {
+        IntervalClass::Positive0
+    } else if interval.min == 0.0 && interval.max == 0.0 {
+        IntervalClass::Zero
+    } else if interval.min < 0.0 && interval.max > 0.0 {
+        IntervalClass::Mixed
+    } else if interval.min < 0.0 && interval.max == 0.0 {
+        IntervalClass::Negative0
+    } else if interval.max < 0.0 {
+        IntervalClass::Negative1
+    } else {
+        panic!("invalid interval: ({}, {})", interval.min, interval.max)
+    }
+}
+
+#[cfg(test)]
+mod serde_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn finite_interval_serializes_as_numbers() {
+        let interval = Interval::new(1.0, 2.0);
+
+        assert_eq!(
+            serde_json::to_value(interval).expect("serialize interval"),
+            json!({ "min": 1.0, "max": 2.0 })
+        );
+    }
+
+    #[test]
+    fn infinite_interval_bounds_serialize_as_special_float_objects() {
+        let interval = Interval::new(f64::NEG_INFINITY, f64::INFINITY);
+
+        assert_eq!(
+            serde_json::to_value(interval).expect("serialize interval"),
+            json!({
+                "min": { "float_special": "NEGATIVE_INFINITY" },
+                "max": { "float_special": "INFINITY" }
+            })
+        );
+    }
+
+    #[test]
+    fn empty_interval_bounds_serialize_as_nan_objects() {
+        let interval = Interval::empty();
+
+        assert_eq!(
+            serde_json::to_value(interval).expect("serialize interval"),
+            json!({
+                "min": { "float_special": "NAN" },
+                "max": { "float_special": "NAN" }
+            })
+        );
+    }
+
+    #[test]
+    fn special_float_objects_deserialize_to_interval_bounds() {
+        let interval: Interval = serde_json::from_value(json!({
+            "min": { "float_special": "NEGATIVE_INFINITY" },
+            "max": { "float_special": "INFINITY" }
+        }))
+        .expect("deserialize interval");
+
+        assert_eq!(interval, Interval::new(f64::NEG_INFINITY, f64::INFINITY));
+    }
+}

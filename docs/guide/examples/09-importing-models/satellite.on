@@ -1,0 +1,3 @@
+submodel orbit as o
+
+Satellite mass: m = 50 :kg

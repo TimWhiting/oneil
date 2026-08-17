@@ -1,0 +1,16 @@
+# Test: `submodel mars_override as planet_a` where mars_override.one is a design
+# file.  The loader detects the .one file and desugars this into loading
+# gravity_earth as planet_a with mars_override applied.
+# Planet B is a plain submodel of gravity_earth with no override.
+
+submodel mars_override as planet_a
+submodel ../gravity_earth as planet_b
+
+# Calculate 100kg weight on each planet.
+# Planet A (overlaid Mars): w = 100 * 3.72 = 372 N
+# Planet B (unchanged Earth): w = 100 * 9.81 = 981 N
+# Total: 1353 N
+Payload: mass = 100 :kg
+Weight A: w_a = mass * g.planet_a :N
+Weight B: w_b = mass * g.planet_b :N
+Total Weight: total = w_a + w_b :N

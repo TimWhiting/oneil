@@ -1,0 +1,11 @@
+---
+source: src/oneil_snapshot_tests/src/test.rs
+expression: "run_fixture(\"design_overlay/scoped_ref_override/far_distance.one\")"
+---
+Model: fixtures/design_overlay/scoped_ref_override/budget.on
+Tests: 0/0
+Parameters:
+  k = 5e-5 :kg/km
+  m0 = 15000 :kg
+  m_req = 2e4 :kg
+  m_margin = -5e3 :kg
