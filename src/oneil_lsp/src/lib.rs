@@ -362,13 +362,16 @@ impl LanguageServer for Backend {
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<LSPAny>> {
-        self.client
-            .log_message(MessageType::INFO, "execute_command called")
-            .await;
-
         if params.command != "oneil/instanceTree" {
             return Ok(None);
         }
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("execute_command {}", params.command),
+            )
+            .await;
 
         let uri_str = params
             .arguments

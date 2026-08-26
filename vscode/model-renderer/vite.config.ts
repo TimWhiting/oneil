@@ -6,11 +6,12 @@ import react from "@vitejs/plugin-react"
 const require = createRequire(import.meta.url)
 
 /**
- * Resolves an installed package to its on-disk directory, independent of
- * whether npm nested it under another package or hoisted it to `node_modules`.
+ * Resolves `dep` as installed for `fromPackage`, including when npm nests it
+ * under that package instead of hoisting it.
  */
-function resolvedPackageDir(name: string): string {
-    return dirname(require.resolve(`${name}/package.json`))
+function resolvedDepFrom(fromPackage: string, dep: string): string {
+    const fromDir = dirname(require.resolve(`${fromPackage}/package.json`))
+    return dirname(require.resolve(`${dep}/package.json`, { paths: [fromDir] }))
 }
 
 /**
@@ -42,7 +43,7 @@ export default defineConfig({
             // `new URL("pdfjs-dist/...", import.meta.url)` in pdfWorker.ts
             // resolves to that same copy, preventing the "API version does not
             // match Worker version" error.
-            "pdfjs-dist": resolvedPackageDir("pdfjs-dist"),
+            "pdfjs-dist": resolvedDepFrom("react-pdf", "pdfjs-dist"),
         },
     },
     // Use relative asset paths so KaTeX fonts resolve correctly inside the
